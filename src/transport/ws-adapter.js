@@ -733,7 +733,22 @@ export function setupWebSocket(server, manager) {
     if (room) broadcastToRoom(code, { type: 'LOBBY_UPDATE', state: room.getState() });
   }
 
-  const wsControls = { getRoomConnections, kickPlayer, closeRoom, broadcastLobby };
+  // Broadcast a message to every connected host/TV screen across all rooms.
+  function broadcastHosts(message) {
+    const payload = JSON.stringify(message);
+    let sent = 0;
+    for (const sockets of roomSockets.values()) {
+      for (const ws of sockets) {
+        if (ws.readyState !== ws.OPEN) continue;
+        if (socketMeta.get(ws)?.role !== 'host') continue;
+        ws.send(payload);
+        sent += 1;
+      }
+    }
+    return sent;
+  }
+
+  const wsControls = { getRoomConnections, kickPlayer, closeRoom, broadcastLobby, broadcastHosts };
   manager.wsControls = wsControls;
 
   return { wss, broadcastToRoom, sendToPlayer, hasActiveSockets, ...wsControls };

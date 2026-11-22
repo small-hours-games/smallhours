@@ -169,6 +169,7 @@
   will-change: transform, opacity;
 }
 .tbs-actor .ai-robot { display: block; width: 100%; height: 100%; }
+.tbs-actor .tbs-bot-canvas { display: block; width: 100%; height: 100%; }
 .tbs-actor-face { display: block; font-size: 180px; line-height: 240px; text-align: center; }
 .tbs-actor-emote {
   position: absolute; left: 50%; top: -78px; width: 120px; margin-left: -60px;
@@ -206,8 +207,10 @@
   .tbs-dancers .duel-fighter-lion { transform: rotateY(16deg) scale(0.66); }
   .tbs-dancers .duel-fighter-frog { transform: rotateY(-16deg) scale(0.66); }
 }
-/* A weak TV (the show's quality governor, or ?showQuality=lite) keeps the dancers: the
-   show moves them every other frame instead (topbar-show.js). */
+/* A weak TV (the show's quality governor, or ?showQuality=lite) drops offscreen filter
+   and shadow passes while keeping every character, event, and animation intact. */
+body.tbs-lite .studio-header.tbs-on .brand-logo { filter: none; }
+body.tbs-lite .tbs-beatline { box-shadow: none; }
 /* No card duel while they are dancing. */
 .tbs-lobby-live .mascot-duel-stage { display: none !important; }
 

@@ -35,6 +35,7 @@ import { mountPotActions } from './pot-routes.js';
 import { rateLimit } from './rate-limit.js';
 import { getPotStore } from '../pot/store.js';
 import { DEFAULT_BANK_PCT, MIN_POT_PLAYERS } from '../pot/payout.js';
+import { defaultLobbyMusicStore } from '../music/lobby-store.js';
 
 const PUBLIC_DIR = fileURLToPath(new URL('../../public', import.meta.url));
 
@@ -163,7 +164,7 @@ function buildTablesSnapshot(manager) {
   };
 }
 
-export function setupAdminRoutes(app, manager = defaultManager) {
+export function setupAdminRoutes(app, manager = defaultManager, { lobbyMusicStore = defaultLobbyMusicStore } = {}) {
   const pageLimiter = rateLimit({ windowMs: 60 * 1000, max: 60 });
 
   app.get('/admin', pageLimiter, async (req, res) => {
@@ -378,4 +379,132 @@ export function setupAdminRoutes(app, manager = defaultManager) {
   });
 
   mountPotActions(app, '/admin/api/pots', { manager, auth: () => true, before: [requireAdminSession] });
+
+  // --- Lobby music playlist, reordering, chunked uploads, and live TV broadcast ---
+
+  const broadcastLobbyMusic = (tracks, { restart = false } = {}) => {
+    const activeUrls = tracks.filter(t => t.enabled).map(t => t.url);
+    return manager.wsControls?.broadcastHosts?.({
+      type: 'LOBBY_MUSIC_UPDATED',
+      tracks: activeUrls,
+      restart: Boolean(restart),
+    }) || 0;
+  };
+
+  app.get('/admin/api/lobby-music', requireAdminSession, async (_req, res) => {
+    try {
+      const tracks = await lobbyMusicStore.listTracks();
+      res.json({ tracks, activeCount: tracks.filter(t => t.enabled).length });
+    } catch (err) {
+      res.status(500).json({ error: err.message || 'Could not load lobby music' });
+    }
+  });
+
+  app.put('/admin/api/lobby-music', requireAdminSession, express.json(), async (req, res) => {
+    if (!Array.isArray(req.body?.tracks)) {
+      return res.status(400).json({ error: 'tracks array is required' });
+    }
+    try {
+      const tracks = await lobbyMusicStore.saveConfig(req.body.tracks);
+      broadcastLobbyMusic(tracks, { restart: false });
+      res.json({ tracks, activeCount: tracks.filter(t => t.enabled).length });
+    } catch (err) {
+      res.status(500).json({ error: err.message || 'Could not save lobby music' });
+    }
+  });
+
+  app.post('/admin/api/lobby-music/uploads', requireAdminSession, express.json(), async (req, res) => {
+    try {
+      const result = await lobbyMusicStore.startUpload(req.body || {});
+      if (!result.ok) return res.status(result.status || 400).json({ error: result.error });
+      res.status(201).json({ uploadId: result.uploadId, chunkSize: result.chunkSize });
+    } catch (err) {
+      res.status(500).json({ error: err.message || 'Could not start upload' });
+    }
+  });
+
+  const UPLOAD_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  app.put(
+    '/admin/api/lobby-music/uploads/:uploadId',
+    requireAdminSession,
+    express.raw({ type: () => true, limit: '4mb' }),
+    async (req, res) => {
+      try {
+        const uploadId = String(req.params.uploadId || '');
+        if (!UPLOAD_ID_RE.test(uploadId)) {
+          return res.status(404).json({ error: 'Upload session not found or expired' });
+        }
+        if (!Buffer.isBuffer(req.body)) {
+          return res.status(400).json({ error: 'Binary audio chunk required' });
+        }
+        const offsetHeader = req.get('X-Chunk-Offset');
+        const offset = typeof offsetHeader === 'string' && offsetHeader.trim() !== '' ? Number(offsetHeader) : NaN;
+        const result = await lobbyMusicStore.appendUploadChunk(uploadId, offset, req.body);
+        if (!result.ok) return res.status(result.status || 400).json({ error: result.error });
+        res.json({ receivedBytes: result.receivedBytes });
+      } catch (err) {
+        res.status(500).json({ error: err.message || 'Could not append upload chunk' });
+      }
+    }
+  );
+
+  app.post('/admin/api/lobby-music/uploads/:uploadId/finish', requireAdminSession, async (req, res) => {
+    try {
+      const uploadId = String(req.params.uploadId || '');
+      if (!UPLOAD_ID_RE.test(uploadId)) {
+        return res.status(404).json({ error: 'Upload session not found or expired' });
+      }
+      const result = await lobbyMusicStore.finishUpload(uploadId);
+      if (!result.ok) return res.status(result.status || 400).json({ error: result.error });
+      broadcastLobbyMusic(result.tracks, { restart: false });
+      res.status(201).json({
+        track: result.track,
+        tracks: result.tracks,
+        activeCount: result.tracks.filter(t => t.enabled).length,
+        xingNormalized: result.xingNormalized,
+        xingWarning: result.xingWarning,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message || 'Could not finalize upload' });
+    }
+  });
+
+  app.delete('/admin/api/lobby-music/uploads/:uploadId', requireAdminSession, async (req, res) => {
+    try {
+      const uploadId = String(req.params.uploadId || '');
+      if (!UPLOAD_ID_RE.test(uploadId)) {
+        return res.json({ ok: true });
+      }
+      await lobbyMusicStore.abortUpload(uploadId);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message || 'Could not abort upload' });
+    }
+  });
+
+  app.post('/admin/api/lobby-music/restart', requireAdminSession, async (_req, res) => {
+    try {
+      const tracks = await lobbyMusicStore.listTracks();
+      const notifiedHosts = broadcastLobbyMusic(tracks, { restart: true });
+      res.json({ ok: true, notifiedHosts });
+    } catch (err) {
+      res.status(500).json({ error: err.message || 'Could not restart lobby music' });
+    }
+  });
+
+  app.delete('/admin/api/lobby-music/:id', requireAdminSession, async (req, res) => {
+    try {
+      const result = await lobbyMusicStore.deleteUpload(req.params.id);
+      if (!result.ok) return res.status(result.status || 400).json({ error: result.error });
+      broadcastLobbyMusic(result.tracks, { restart: false });
+      res.json({
+        ok: true,
+        tracks: result.tracks,
+        activeCount: result.tracks.filter(t => t.enabled).length,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message || 'Could not delete track' });
+    }
+  });
 }

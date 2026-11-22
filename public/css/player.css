@@ -378,26 +378,59 @@
 }
 #quizTimerText.quiz-ready-number { font-size: clamp(5rem, 24vw, 8rem); }
 
-/* Game over standings card on mobile */
+/* Game over fronting overlay frame on mobile (sits in front of all game controllers) */
 .game-over-banner {
-  border-radius: 22px;
-  padding: 16px;
-  background: linear-gradient(160deg, #0b1530 0%, #13234a 100%);
-  border: 2px solid rgba(250, 204, 21, 0.55);
-  color: #ffffff;
-  box-shadow: 0 18px 42px -12px rgba(11, 21, 48, 0.65);
+  position: fixed;
+  inset: 0;
+  z-index: 220;
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 8px;
+  align-items: center;
+  justify-content: center;
+  padding: calc(16px + env(safe-area-inset-top)) 16px calc(20px + env(safe-area-inset-bottom));
 }
 .game-over-banner[hidden] { display: none; }
-.game-over-standings { display: flex; flex-direction: column; gap: 6px; }
+.game-over-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(4, 9, 22, 0.74);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  opacity: 0;
+  transition: opacity 0.22s ease;
+}
+.game-over-card {
+  position: relative;
+  width: 100%;
+  max-width: 440px;
+  max-height: 85dvh;
+  border-radius: 24px;
+  padding: 20px;
+  background: linear-gradient(160deg, #0b1530 0%, #13234a 100%);
+  border: 2px solid rgba(250, 204, 21, 0.65);
+  color: #ffffff;
+  box-shadow: 0 24px 60px -12px rgba(4, 9, 22, 0.85), 0 0 0 1px rgba(250, 204, 21, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  opacity: 0;
+  transform: translateY(18px) scale(0.96);
+  transition: opacity 0.22s ease, transform 0.26s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.game-over-banner.is-open .game-over-backdrop { opacity: 1; }
+.game-over-banner.is-open .game-over-card { opacity: 1; transform: none; }
+.game-over-standings {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  min-height: 0;
+}
 .game-over-row {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  padding: 8px 10px; border-radius: 12px;
+  padding: 9px 12px; border-radius: 12px;
   background: rgba(255, 255, 255, 0.08);
-  font-size: 0.88rem; font-weight: 700;
+  font-size: 0.9rem; font-weight: 700;
 }
 .game-over-row.is-winner {
   background: rgba(250, 204, 21, 0.16);

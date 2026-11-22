@@ -173,18 +173,6 @@
     </div>
 
     <!-- game-sections -->
-
-    <div id="gameOverBanner" class="game-over-banner" hidden aria-live="polite">
-      <div class="flex items-center justify-between gap-2">
-        <div>
-          <div class="text-[11px] font-extrabold uppercase tracking-widest text-amber-300">Match Complete</div>
-          <h2 id="gameOverTitle" class="font-display font-bold text-xl text-white">Game Over!</h2>
-        </div>
-        <span class="text-2xl" aria-hidden="true">&#127942;</span>
-      </div>
-      <div id="gameOverStandings" class="game-over-standings"></div>
-      <button type="button" id="backToLobbyBtn" onclick="returnToLobby()" class="w-full min-h-[48px] py-3 px-4 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-sm shadow-lg transition active:scale-[0.98]">Back to Lobby</button>
-    </div>
   </main>
 
   <!-- Avatar picker: the face the TV shows next to your name -->
@@ -222,6 +210,22 @@
         <button type="button" onclick="closeSurrenderModal()" class="py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm">Cancel</button>
         <button type="button" onclick="confirmSurrender()" class="py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-sm">Surrender</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Game-over fronting frame: sits in front of the mobile controller area when a match finishes -->
+  <div id="gameOverBanner" class="game-over-banner" hidden aria-live="polite">
+    <div class="game-over-backdrop" aria-hidden="true"></div>
+    <div class="game-over-card" role="dialog" aria-modal="true" aria-labelledby="gameOverTitle">
+      <div class="flex items-center justify-between gap-3">
+        <div class="min-w-0">
+          <div class="text-[11px] font-extrabold uppercase tracking-widest text-amber-300">Match Complete</div>
+          <h2 id="gameOverTitle" class="font-display font-bold text-2xl text-white truncate">Game Over!</h2>
+        </div>
+        <span class="text-3xl shrink-0" aria-hidden="true">&#127942;</span>
+      </div>
+      <div id="gameOverStandings" class="game-over-standings"></div>
+      <button type="button" id="backToLobbyBtn" onclick="returnToLobby()" class="w-full min-h-[54px] py-3.5 px-5 rounded-2xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-base tracking-tight shadow-lg shadow-amber-500/25 transition active:scale-[0.98]">Back to Lobby</button>
     </div>
   </div>
 
@@ -940,11 +944,18 @@
         '</div>';
       }).join('');
       banner.hidden = false;
+      requestAnimationFrame(() => banner.classList.add('is-open'));
+      const backBtn = document.getElementById('backToLobbyBtn');
+      if (backBtn && typeof backBtn.focus === 'function') {
+        try { backBtn.focus({ preventScroll: true }); } catch { backBtn.focus(); }
+      }
     }
 
     function hideGameOverBanner() {
       const banner = document.getElementById('gameOverBanner');
-      if (banner) banner.hidden = true;
+      if (!banner) return;
+      banner.classList.remove('is-open');
+      banner.hidden = true;
     }
 
     function returnToLobby(toastMsg) {

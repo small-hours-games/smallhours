@@ -1,7 +1,9 @@
 // Topbar show timing: the beat map and the pose math that keeps the singer on the beat.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
+import * as THREE from '../../public/vendor/three/three.module.min.js';
+import { AI_PERSONAS } from '../../src/engine/bots/personas.js';
 
 const kit = {};
 runInNewContext(readFileSync(new URL('../../public/js/topbar-show.js', import.meta.url), 'utf8'), kit);
@@ -395,5 +397,96 @@ describe('The cast sings along', () => {
     }
     expect(lines.every(l => l.at + l.len <= crash || l.at >= crash + 16.4)).toBe(true);
     expect(lines.every(l => ['singer', 'nova', 'glitch', 'byte', 'turbo', 'all'].includes(l.who))).toBe(true);
+  });
+});
+
+describe('3D AI robots in the lobby show', () => {
+  const shCtx = { SH: {} };
+  runInNewContext(
+    readFileSync(new URL('../../public/js/avatars.js', import.meta.url), 'utf8') + '\n' +
+    readFileSync(new URL('../../public/js/avatar-3d.js', import.meta.url), 'utf8'),
+    shCtx,
+  );
+
+  it('maps show poses onto finite 3D limb, head, facing and flame transforms without allocating', () => {
+    const scratch = {};
+    for (const kind of ['boot', 'glitch', 'dizzy', 'zoom']) {
+      const right = kit.tbsBot3dPose(kind, { step: 0.25, wheel: 90, boost: 1, tilt: 12, arm: 0.9, look: 15, jitter: 1, mood: 'worried', flip: 1 }, scratch);
+      expect(right).toBe(scratch);
+      for (const [k, v] of Object.entries(right)) {
+        if (k === 'worried') expect(v).toBe(true);
+        else expect(Number.isFinite(v), `${kind}.${k}`).toBe(true);
+      }
+      expect(right.bodyRy).toBeGreaterThan(0);
+      expect(right.armLRz).toBeLessThan(-1);
+      expect(right.armRRz).toBeGreaterThan(1);
+
+      const left = kit.tbsBot3dPose(kind, { flip: -1, look: -15, mood: 'calm', boost: 0 });
+      expect(left.bodyRy).toBeLessThan(0);
+      expect(left.headRy).toBeLessThan(0);
+      expect(left.worried).toBe(false);
+    }
+
+    const idleZoom = kit.tbsBot3dPose('zoom', { boost: 0 });
+    const fullZoom = kit.tbsBot3dPose('zoom', { boost: 1 });
+    expect(fullZoom.flameScale).toBeGreaterThan(idleZoom.flameScale);
+    expect(fullZoom.bodyY).toBeGreaterThan(idleZoom.bodyY);
+    expect(fullZoom.shadowOp).toBeLessThan(idleZoom.shadowOp);
+  });
+
+  it('builds the 4 SH.avatarRig robots on one shared WebGL stage, renders one at a time, and disposes cleanly', () => {
+    const cast = AI_PERSONAS.slice(0, 4).map(p => ({ avatar: p.avatar, kind: p.entrance }));
+    const domElement = { tagName: 'CANVAS' };
+    const visibilityPerRender = [];
+    const renderer = {
+      domElement,
+      setClearColor: vi.fn(),
+      setPixelRatio: vi.fn(),
+      setSize: vi.fn(),
+      render: vi.fn(scene => {
+        const visibleActors = stage3d.actors.filter(a => a.root.visible).length;
+        visibilityPerRender.push(visibleActors);
+        expect(scene.children.length).toBeGreaterThanOrEqual(4);
+      }),
+      dispose: vi.fn(),
+      forceContextLoss: vi.fn(),
+    };
+
+    const stage3d = kit.createTopbarBotStage3d(THREE, cast, {
+      lowPower: false,
+      avatarRig: shCtx.SH.avatarRig,
+      rendererFactory: () => renderer,
+    });
+
+    expect(stage3d.width).toBe(240);
+    expect(stage3d.height).toBe(288);
+    expect(stage3d.actors).toHaveLength(4);
+    expect(stage3d.actors[3].flame).toBeTruthy();
+
+    const ctx2d = { clearRect: vi.fn(), drawImage: vi.fn() };
+    for (let i = 0; i < 4; i++) {
+      stage3d.renderActor(i, { step: 0.25, wheel: 60, boost: 0.9, arm: 0.7, look: 10, mood: i === 0 ? 'worried' : 'calm', flip: i < 2 ? 1 : -1 }, ctx2d);
+      expect(stage3d.actors[i].root.visible).toBe(false);
+    }
+    expect(visibilityPerRender).toEqual([1, 1, 1, 1]);
+    expect(stage3d.actors[0].sweat.visible).toBe(true);
+    expect(stage3d.actors[1].sweat.visible).toBe(false);
+    expect(ctx2d.clearRect).toHaveBeenCalledTimes(4);
+    expect(ctx2d.drawImage).toHaveBeenCalledWith(domElement, 0, 0, 240, 288);
+
+    stage3d.dispose();
+    expect(renderer.dispose).toHaveBeenCalledTimes(1);
+    expect(renderer.forceContextLoss).toHaveBeenCalledTimes(1);
+
+    // Post-dispose render calls are safe no-ops.
+    stage3d.renderActor(0, {}, ctx2d);
+    expect(renderer.render).toHaveBeenCalledTimes(4);
+
+    // Low-power (Android TV) uses the smaller pixel buffer.
+    const liteRenderer = { domElement, setClearColor: vi.fn(), setPixelRatio: vi.fn(), setSize: vi.fn(), render: vi.fn(), dispose: vi.fn(), forceContextLoss: vi.fn() };
+    const lite = kit.createTopbarBotStage3d(THREE, cast, { lowPower: true, avatarRig: shCtx.SH.avatarRig, rendererFactory: () => liteRenderer });
+    expect(lite.width).toBe(160);
+    expect(lite.height).toBe(192);
+    lite.dispose();
   });
 });

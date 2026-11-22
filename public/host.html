@@ -445,6 +445,11 @@
       switch (msg.type) {
         case 'DISPLAY_OK':
           showToast('Connected as host', 'success');
+          lobbyMusic.reload();
+          break;
+
+        case 'LOBBY_MUSIC_UPDATED':
+          lobbyMusic.setTracks(msg.tracks || [], { restart: Boolean(msg.restart) });
           break;
 
         case 'LOBBY_UPDATE':

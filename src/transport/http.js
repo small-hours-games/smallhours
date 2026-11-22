@@ -13,6 +13,7 @@ import { GAMES_DIR, renderGamePage } from '../games/client.js';
 import { BUILD_INFO } from '../version.js';
 import { setupAdminRoutes } from './admin-routes.js';
 import { setupApiV1Routes } from './api-v1.js';
+import { defaultLobbyMusicStore } from '../music/lobby-store.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -40,8 +41,8 @@ async function servePage(res, file) {
   }
 }
 
-export function setupRoutes(app, manager) {
-  // Each folder in music/ is one playlist.
+export function setupRoutes(app, manager, { lobbyMusicStore = defaultLobbyMusicStore } = {}) {
+  // Each folder in music/ is one playlist; lobby music supports admin ordering and uploads.
   const playlist = folder => async (_req, res) => {
     try {
       const entries = await fs.promises.readdir(path.join(MUSIC_DIR, folder), { withFileTypes: true });
@@ -53,8 +54,16 @@ export function setupRoutes(app, manager) {
       res.status(500).json({ error: 'Could not load music' });
     }
   };
-  app.get('/api/lobby-music', playlist('lobby'));
+  app.get('/api/lobby-music', async (_req, res) => {
+    try {
+      const tracks = await lobbyMusicStore.getActiveUrls();
+      res.json({ tracks });
+    } catch {
+      res.status(500).json({ error: 'Could not load music' });
+    }
+  });
   app.get('/api/game-music', playlist('quiz-card'));
+  app.use('/music/lobby/uploads', express.static(lobbyMusicStore.uploadsDir, { index: false, dotfiles: 'deny' }));
   app.use('/music', express.static(MUSIC_DIR, { index: false, dotfiles: 'deny' }));
 
   // Health check
@@ -121,7 +130,7 @@ export function setupRoutes(app, manager) {
   }
   app.use('/games/_api-card', express.static(path.join(GAMES_DIR, '_api-card', 'client'), { index: false }));
 
-  setupAdminRoutes(app, manager);
+  setupAdminRoutes(app, manager, { lobbyMusicStore });
   setupSwishRoutes(app, manager);
   setupPotRoutes(app, manager);
   setupApiV1Routes(app, manager);
@@ -182,7 +191,7 @@ export function setupRoutes(app, manager) {
 
   // Route /host/:code to host.html, /player/:code to player.html
   app.use((req, res) => {
-    if (req.path.startsWith('/api/') || req.path.startsWith('/ws/') || req.path.startsWith('/download/')) {
+    if (req.path.startsWith('/api/') || req.path.startsWith('/ws/') || req.path.startsWith('/download/') || req.path.startsWith('/music/') || req.path.startsWith('/admin/api/')) {
       res.status(404).json({ error: 'Not found' });
       return;
     }
