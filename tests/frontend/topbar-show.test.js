@@ -489,4 +489,38 @@ describe('3D AI robots in the lobby show', () => {
     expect(lite.height).toBe(192);
     lite.dispose();
   });
+
+  it('builds the detailed 3D PBR models for Nova-7, Glitch, Prof. Byte (with martini, standing), and Turbo', () => {
+    const countMeshes = group => {
+      let meshes = 0;
+      let standardMats = 0;
+      group.traverse(o => {
+        if (o.isMesh) {
+          meshes++;
+          if (o.material && o.material.type === 'MeshStandardMaterial') standardMats++;
+        }
+      });
+      return { meshes, standardMats };
+    };
+
+    const nova = kit.tbsCreateNova7(THREE);
+    const glitch = kit.tbsCreateGlitch(THREE);
+    const byte = kit.tbsCreateProfByte(THREE);
+    const turbo = kit.tbsCreateTurbo(THREE);
+
+    // Every character is a multi-part PBR model with articulated joints and dynamic pose handler.
+    for (const rig of [nova, glitch, byte, turbo]) {
+      const stats = countMeshes(rig.group);
+      expect(stats.meshes).toBeGreaterThan(25);
+      expect(stats.standardMats).toBeGreaterThan(15);
+      expect(rig.head).toBeTruthy();
+      expect(rig.legL).toBeTruthy();
+      expect(rig.legR).toBeTruthy();
+      expect(rig.armL).toBeTruthy();
+      expect(rig.armR).toBeTruthy();
+      expect(typeof rig.applyPose).toBe('function');
+    }
+    expect(turbo.flame).toBeTruthy();
+    expect(turbo.flame.children.length).toBeGreaterThanOrEqual(4); // 3 plasma cones + halo sprite
+  });
 });

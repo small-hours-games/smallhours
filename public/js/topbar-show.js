@@ -699,8 +699,8 @@ function tbsBotPose(loc, idx, kind, reduced, ctx) {
 
 /**
  * Maps a robot's show pose ({ step, wheel, boost, tilt, arm, look, jitter, mood, flip, away })
- * onto 3D transforms for the SH.avatarRig models (public/js/avatar-3d.js). Writes into `out`
- * when given so per-frame animation allocates nothing. Pure; for tests.
+ * onto 3D transforms for the Smallhours 3D PBR robot cast (Nova-7, Glitch, Prof. Byte, Turbo).
+ * Writes into `out` when given so per-frame animation allocates nothing. Pure; for tests.
  */
 function tbsBot3dPose(kind, p, out) {
   p = p || {};
@@ -720,6 +720,9 @@ function tbsBot3dPose(kind, p, out) {
   out.legLRx = 0; out.legLRz = 0; out.legRRx = 0; out.legRRz = 0;
   out.armLRx = 0; out.armLRz = 0; out.armRRx = 0; out.armRRz = 0;
   out.flameScale = 1; out.shadowOp = 0.28; out.worried = worried;
+  out.step = step; out.wheel = p.wheel || 0; out.boost = p.boost == null ? 0.4 : p.boost;
+  out.arm = arm; out.jitter = jitter; out.hit = p.hit || 0; out.energy = p.energy == null ? 0.6 : p.energy;
+  out.t = p.t || 0;
 
   if (kind === 'boot') {
     out.bodyY = Math.abs(s) * 0.06;
@@ -780,16 +783,1713 @@ function tbsBot3dPose(kind, p, out) {
   return out;
 }
 
+// ---- 3D PBR Robot Cast Models (Nova-7, Glitch, Prof. Byte, Turbo) ----
+function tbsMakeTexCanvas(THREE, w, h) {
+  var c = typeof document !== 'undefined' && document.createElement ? document.createElement('canvas') : null;
+  if (c) { c.width = w; c.height = h; }
+  var ctx = c && typeof c.getContext === 'function' ? c.getContext('2d') : null;
+  var tex = c && ctx ? new THREE.CanvasTexture(c) : new THREE.Texture();
+  if (THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace;
+  return { canvas: c, ctx: ctx, texture: tex };
+}
+
+function tbsRoundedRectShape(THREE, w, h, r) {
+  var s = new THREE.Shape();
+  var x = -w / 2, y = -h / 2, rr = Math.min(r, w / 2, h / 2);
+  s.moveTo(x + rr, y);
+  s.lineTo(x + w - rr, y);
+  s.quadraticCurveTo(x + w, y, x + w, y + rr);
+  s.lineTo(x + w, y + h - rr);
+  s.quadraticCurveTo(x + w, y + h, x + w - rr, y + h);
+  s.lineTo(x + rr, y + h);
+  s.quadraticCurveTo(x, y + h, x, y + h - rr);
+  s.lineTo(x, y + rr);
+  s.quadraticCurveTo(x, y, x + rr, y);
+  return s;
+}
+
+function tbsExtrudedRoundedBox(THREE, w, h, d, radius, bevel) {
+  if (bevel == null) bevel = 0.05;
+  var shape = tbsRoundedRectShape(THREE, w - bevel * 2, h - bevel * 2, Math.max(0.01, radius - bevel));
+  var geo = new THREE.ExtrudeGeometry(shape, {
+    depth: Math.max(0.02, d - bevel * 2),
+    bevelEnabled: true,
+    bevelSegments: 4,
+    steps: 1,
+    bevelSize: bevel,
+    bevelThickness: bevel,
+    curveSegments: 12,
+  });
+  geo.center();
+  return geo;
+}
+
+function tbsStudioEnvironment(THREE, renderer) {
+  if (!THREE.PMREMGenerator || !renderer || typeof renderer.getContext !== 'function') return null;
+  try {
+    var pmrem = new THREE.PMREMGenerator(renderer);
+    var envScene = new THREE.Scene();
+    envScene.background = new THREE.Color('#0c1838');
+    var panelGeo = new THREE.PlaneGeometry(10, 10);
+    var makePanel = function (color, intensity, pos, lookAt) {
+      var mat = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(color).multiplyScalar(intensity),
+        side: THREE.DoubleSide,
+      });
+      var m = new THREE.Mesh(panelGeo, mat);
+      m.position.set(pos[0], pos[1], pos[2]);
+      m.lookAt(lookAt[0], lookAt[1], lookAt[2]);
+      envScene.add(m);
+    };
+    makePanel('#ffffff', 2.4, [0, 8, 5], [0, 0, 0]);
+    makePanel('#38bdf8', 2.0, [-8, 3, 4], [0, 0, 0]);
+    makePanel('#facc15', 1.8, [8, 4, 3], [0, 0, 0]);
+    makePanel('#a78bfa', 1.3, [-6, -4, -6], [0, 0, 0]);
+    makePanel('#fb7185', 1.2, [6, -3, -6], [0, 0, 0]);
+    var rt = pmrem.fromScene(envScene, 0.04);
+    pmrem.dispose();
+    panelGeo.dispose();
+    return rt.texture;
+  } catch (_) {
+    return null;
+  }
+}
+
+function tbsContactShadowMesh(THREE, radius, tint) {
+  if (radius == null) radius = 0.95;
+  if (!tint) tint = 'rgba(56, 189, 248, 0.16)';
+  var tc = tbsMakeTexCanvas(THREE, 128, 128);
+  if (tc.ctx) {
+    var g = tc.ctx.createRadialGradient(64, 64, 6, 64, 64, 60);
+    g.addColorStop(0, 'rgba(2, 6, 20, 0.72)');
+    g.addColorStop(0.55, tint);
+    g.addColorStop(1, 'rgba(2, 6, 20, 0)');
+    tc.ctx.fillStyle = g;
+    tc.ctx.fillRect(0, 0, 128, 128);
+    tc.texture.needsUpdate = true;
+  }
+  var mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(radius * 2, radius * 2),
+    new THREE.MeshBasicMaterial({
+      map: tc.texture,
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false,
+    })
+  );
+  mesh.rotation.x = -Math.PI / 2;
+  return mesh;
+}
+
+function tbsGlowSprite(THREE, innerRgba, midRgba, outerRgba) {
+  if (!outerRgba) outerRgba = 'rgba(0,0,0,0)';
+  var tc = tbsMakeTexCanvas(THREE, 128, 128);
+  if (tc.ctx) {
+    var g = tc.ctx.createRadialGradient(64, 64, 4, 64, 64, 62);
+    g.addColorStop(0, innerRgba);
+    g.addColorStop(0.38, midRgba);
+    g.addColorStop(1, outerRgba);
+    tc.ctx.fillStyle = g;
+    tc.ctx.fillRect(0, 0, 128, 128);
+    tc.texture.needsUpdate = true;
+  }
+  return new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: tc.texture,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    })
+  );
+}
+
 /**
- * Single shared offscreen Three.js WebGL stage that renders each AI robot's 3D SH.avatarRig
- * model onto its lightweight 2D canvas inside .tbs-actor. Uses one WebGL context total (disposed
- * as soon as the show stops) and a small pixel buffer so weak Android TV chips stay smooth.
+ * 3D PBR Nova-7 ('boot'): 6-stage articulated neck, hydraulic pistons, contoured chest
+ * with '7' reactor core, animated LED visor with cyber EQ mouth, 3D Wayfarer sunglasses,
+ * and 2-stage spring yellow beacon antenna.
+ */
+function tbsCreateNova7(THREE) {
+  var matHull = new THREE.MeshStandardMaterial({ color: '#f1f5f9', metalness: 0.24, roughness: 0.22, envMapIntensity: 1.15 });
+  var matHullShade = new THREE.MeshStandardMaterial({ color: '#cbd5e1', metalness: 0.35, roughness: 0.32 });
+  var matSteel = new THREE.MeshStandardMaterial({ color: '#64748b', metalness: 0.82, roughness: 0.28, envMapIntensity: 1.35 });
+  var matChrome = new THREE.MeshStandardMaterial({ color: '#e2e8f0', metalness: 0.94, roughness: 0.14, envMapIntensity: 1.5 });
+  var matDarkNavy = new THREE.MeshStandardMaterial({ color: '#0b1530', metalness: 0.45, roughness: 0.42 });
+  var matCyanArmor = new THREE.MeshStandardMaterial({ color: '#38bdf8', emissive: '#0284c7', emissiveIntensity: 0.65, metalness: 0.35, roughness: 0.2 });
+  var matCyanGlow = new THREE.MeshStandardMaterial({ color: '#7dd3fc', emissive: '#38bdf8', emissiveIntensity: 1.6, metalness: 0.1, roughness: 0.15 });
+  var matBeacon = new THREE.MeshStandardMaterial({ color: '#fde047', emissive: '#facc15', emissiveIntensity: 2.2, metalness: 0.1, roughness: 0.15 });
+
+  // Chest '7' reactor texture
+  var rTc = tbsMakeTexCanvas(THREE, 256, 256);
+  if (rTc.ctx) {
+    var rCtx = rTc.ctx;
+    var rGrad = rCtx.createRadialGradient(120, 105, 15, 128, 128, 128);
+    rGrad.addColorStop(0, '#e0f2fe');
+    rGrad.addColorStop(0.28, '#7dd3fc');
+    rGrad.addColorStop(0.68, '#38bdf8');
+    rGrad.addColorStop(1, '#0284c7');
+    rCtx.fillStyle = rGrad;
+    rCtx.fillRect(0, 0, 256, 256);
+    rCtx.strokeStyle = 'rgba(255,255,255,0.45)';
+    rCtx.lineWidth = 4;
+    rCtx.beginPath();
+    rCtx.arc(128, 128, 106, Math.PI * 1.15, Math.PI * 1.85);
+    rCtx.stroke();
+    rCtx.strokeStyle = '#0b1530';
+    rCtx.lineWidth = 26;
+    rCtx.lineCap = 'round';
+    rCtx.lineJoin = 'round';
+    rCtx.beginPath();
+    rCtx.moveTo(82, 76);
+    rCtx.lineTo(176, 76);
+    rCtx.lineTo(117, 188);
+    rCtx.stroke();
+    rTc.texture.needsUpdate = true;
+  }
+  var matReactor = new THREE.MeshStandardMaterial({
+    map: rTc.texture,
+    emissive: '#38bdf8',
+    emissiveMap: rTc.texture,
+    emissiveIntensity: 0.85,
+    roughness: 0.18,
+    metalness: 0.12,
+  });
+
+  // Animated visor face controller
+  var vTc = tbsMakeTexCanvas(THREE, 256, 144);
+  var lastVisorKey = '';
+  function drawVisor(energy, accent, beatGlow, worried) {
+    if (!vTc.ctx) return;
+    var key = Math.round(energy * 6) + ':' + Math.round(accent * 6) + ':' + Math.round(beatGlow * 8) + ':' + (worried ? 1 : 0);
+    if (key === lastVisorKey) return;
+    lastVisorKey = key;
+    var ctx = vTc.ctx;
+    ctx.clearRect(0, 0, 256, 144);
+    var bg = ctx.createLinearGradient(30, 0, 225, 144);
+    bg.addColorStop(0, '#10204a');
+    bg.addColorStop(0.55, '#070f24');
+    bg.addColorStop(1, '#030712');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, 256, 144);
+    ctx.fillStyle = 'rgba(56, 189, 248, 0.06)';
+    for (var y = 5; y < 144; y += 6) ctx.fillRect(0, y, 256, 1.5);
+
+    var browDip = worried ? -8 : (5 + accent * 7 + energy * 3);
+    var eyeTopY = 43;
+    var eyeBotY = 73 - accent * 5;
+    ctx.save();
+    ctx.shadowColor = '#38bdf8';
+    ctx.shadowBlur = 8 + beatGlow * 10;
+    [-1, 1].forEach(function (side) {
+      var cx = side < 0 ? 78 : 178;
+      var outerX = cx + side * 31;
+      var innerX = cx - side * 26;
+      ctx.beginPath();
+      ctx.moveTo(outerX, eyeTopY - (worried ? 5 : 0));
+      ctx.lineTo(innerX, eyeTopY + browDip);
+      ctx.lineTo(innerX + side * 3, eyeBotY);
+      ctx.lineTo(outerX - side * 5, eyeBotY - 2);
+      ctx.closePath();
+      ctx.fillStyle = '#38bdf8';
+      ctx.fill();
+      ctx.fillStyle = '#e0f2fe';
+      ctx.beginPath();
+      ctx.moveTo(outerX - side * 7, eyeTopY + 6);
+      ctx.lineTo(innerX + side * 6, eyeTopY + browDip + 5);
+      ctx.lineTo(innerX + side * 7.5, eyeBotY - 6);
+      ctx.lineTo(outerX - side * 9, eyeBotY - 7);
+      ctx.closePath();
+      ctx.fill();
+    });
+    var bars = 9, barW = 7, gap = 4;
+    var totalW = bars * barW + (bars - 1) * gap;
+    var startX = 128 - totalW / 2, midY = 104;
+    for (var i = 0; i < bars; i++) {
+      var dist = Math.abs(i - 4) / 4;
+      var eqSample = 0.35 + 0.45 * Math.abs(Math.sin(i * 1.3 + beatGlow * 4));
+      var barH = Math.max(3, (4 + eqSample * 17 + beatGlow * 7) * (1 - dist * 0.45));
+      ctx.fillStyle = i === 4 && beatGlow > 0.45 ? '#fde047' : '#38bdf8';
+      ctx.fillRect(startX + i * (barW + gap), midY - barH / 2, barW, barH);
+    }
+    ctx.restore();
+    vTc.texture.needsUpdate = true;
+  }
+  drawVisor(0.5, 0, 0, false);
+
+  var matVisor = new THREE.MeshStandardMaterial({
+    map: vTc.texture,
+    emissive: '#ffffff',
+    emissiveMap: vTc.texture,
+    emissiveIntensity: 0.95,
+    roughness: 0.08,
+    metalness: 0.25,
+    envMapIntensity: 1.6,
+  });
+
+  var root = new THREE.Group();
+  var shadow = tbsContactShadowMesh(THREE, 0.92, 'rgba(56, 189, 248, 0.18)');
+  shadow.position.set(0, -0.24, 0.02);
+  root.add(shadow);
+
+  var bodyRoot = new THREE.Group();
+  root.add(bodyRoot);
+
+  var pelvis = new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 0.92, 0.26, 0.56, 0.12, 0.04), matDarkNavy);
+  pelvis.position.set(0, 0.88, 0);
+  bodyRoot.add(pelvis);
+
+  var hipBelt = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.36, 0.16, 20), matSteel);
+  hipBelt.position.set(0, 1.03, 0);
+  bodyRoot.add(hipBelt);
+
+  function buildLeg(side) {
+    var hip = new THREE.Group();
+    hip.position.set(side * 0.28, 0.82, 0);
+    var thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.11, 0.36, 8, 14), matSteel);
+    thigh.position.set(side * 0.04, -0.22, 0);
+    thigh.rotation.z = -side * 0.08;
+    hip.add(thigh);
+    var knee = new THREE.Group();
+    knee.position.set(side * 0.06, -0.46, 0.02);
+    hip.add(knee);
+    knee.add(new THREE.Mesh(new THREE.SphereGeometry(0.135, 16, 14), matHull));
+    var kneeLed = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.05, 14), matCyanGlow);
+    kneeLed.rotation.x = Math.PI / 2;
+    kneeLed.position.set(0, 0, 0.125);
+    knee.add(kneeLed);
+    var shin = new THREE.Mesh(new THREE.CapsuleGeometry(0.105, 0.34, 8, 14), matSteel);
+    shin.position.set(-side * 0.02, -0.26, -0.02);
+    knee.add(shin);
+    var ankle = new THREE.Group();
+    ankle.position.set(-side * 0.02, -0.50, 0.02);
+    knee.add(ankle);
+    var boot = new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 0.32, 0.22, 0.48, 0.08, 0.03), matCyanArmor);
+    boot.position.set(0, 0, 0.04);
+    ankle.add(boot);
+    var sole = new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 0.34, 0.05, 0.50, 0.04, 0.015), matDarkNavy);
+    sole.position.set(0, -0.10, 0.04);
+    ankle.add(sole);
+    bodyRoot.add(hip);
+    return { hip: hip, knee: knee, ankle: ankle };
+  }
+  var legL = buildLeg(-1);
+  var legR = buildLeg(1);
+
+  var torsoGroup = new THREE.Group();
+  torsoGroup.position.set(0, 1.06, 0);
+  bodyRoot.add(torsoGroup);
+
+  var chestShape = new THREE.Shape();
+  chestShape.moveTo(-0.56, 0.44);
+  chestShape.quadraticCurveTo(0, 0.54, 0.56, 0.44);
+  chestShape.lineTo(0.60, -0.22);
+  chestShape.quadraticCurveTo(0.56, -0.46, 0.30, -0.49);
+  chestShape.lineTo(-0.30, -0.49);
+  chestShape.quadraticCurveTo(-0.56, -0.46, -0.60, -0.22);
+  chestShape.closePath();
+  var chestGeo = new THREE.ExtrudeGeometry(chestShape, {
+    depth: 0.48, bevelEnabled: true, bevelSegments: 4, steps: 1, bevelSize: 0.065, bevelThickness: 0.085, curveSegments: 12,
+  });
+  chestGeo.center();
+  var chestMesh = new THREE.Mesh(chestGeo, matHull);
+  chestMesh.position.set(0, 0.56, 0);
+  torsoGroup.add(chestMesh);
+
+  var backPack = new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 0.76, 0.72, 0.26, 0.12, 0.04), matHullShade);
+  backPack.position.set(0, 0.58, -0.28);
+  torsoGroup.add(backPack);
+
+  var backSpineLed = new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 0.16, 0.44, 0.06, 0.04, 0.015), matCyanGlow);
+  backSpineLed.position.set(0, 0.58, -0.41);
+  torsoGroup.add(backSpineLed);
+
+  var chestBelt = new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 0.76, 0.10, 0.08, 0.04, 0.015), matCyanGlow);
+  chestBelt.position.set(0, 0.21, 0.315);
+  torsoGroup.add(chestBelt);
+
+  [-0.44, 0.44].forEach(function (rx) {
+    var rivet = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.036, 0.04, 12), matSteel);
+    rivet.rotation.x = Math.PI / 2;
+    rivet.position.set(rx, 0.84, 0.31);
+    torsoGroup.add(rivet);
+  });
+
+  var reactorRingOuter = new THREE.Mesh(new THREE.TorusGeometry(0.275, 0.038, 12, 28), matDarkNavy);
+  reactorRingOuter.position.set(0, 0.58, 0.32);
+  torsoGroup.add(reactorRingOuter);
+  var reactorRingTrim = new THREE.Mesh(new THREE.TorusGeometry(0.305, 0.018, 10, 28), matSteel);
+  reactorRingTrim.position.set(0, 0.58, 0.315);
+  torsoGroup.add(reactorRingTrim);
+  var reactorBack = new THREE.Mesh(new THREE.CylinderGeometry(0.255, 0.255, 0.06, 28), matDarkNavy);
+  reactorBack.rotation.x = Math.PI / 2;
+  reactorBack.position.set(0, 0.58, 0.305);
+  torsoGroup.add(reactorBack);
+  var reactorCore = new THREE.Mesh(new THREE.CircleGeometry(0.252, 28), matReactor);
+  reactorCore.position.set(0, 0.58, 0.342);
+  torsoGroup.add(reactorCore);
+
+  var collarRing = new THREE.Mesh(new THREE.CylinderGeometry(0.30, 0.38, 0.14, 20), matDarkNavy);
+  collarRing.position.set(0, 1.07, 0);
+  torsoGroup.add(collarRing);
+  var collarAccent = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.022, 10, 24), matCyanArmor);
+  collarAccent.rotation.x = Math.PI / 2;
+  collarAccent.position.set(0, 1.12, 0);
+  torsoGroup.add(collarAccent);
+
+  function buildArm(side) {
+    var shoulder = new THREE.Group();
+    shoulder.position.set(side * 0.72, 0.88, 0.02);
+    shoulder.add(new THREE.Mesh(new THREE.SphereGeometry(0.21, 16, 14), matHull));
+    var pauldronTrim = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.024, 10, 20), matDarkNavy);
+    pauldronTrim.rotation.y = Math.PI / 2;
+    pauldronTrim.position.x = side * 0.11;
+    shoulder.add(pauldronTrim);
+    var pauldronHub = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.085, 0.05, 16), matCyanGlow);
+    pauldronHub.rotation.z = Math.PI / 2;
+    pauldronHub.position.x = side * 0.19;
+    shoulder.add(pauldronHub);
+    var upperArm = new THREE.Mesh(new THREE.CapsuleGeometry(0.082, 0.34, 8, 12), matSteel);
+    upperArm.position.set(side * 0.12, -0.24, 0.02);
+    upperArm.rotation.z = side * 0.28;
+    shoulder.add(upperArm);
+    var elbow = new THREE.Group();
+    elbow.position.set(side * 0.24, -0.46, 0.05);
+    shoulder.add(elbow);
+    elbow.add(new THREE.Mesh(new THREE.SphereGeometry(0.12, 14, 12), matHull));
+    var elbowRing = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.018, 8, 16), matDarkNavy);
+    elbowRing.rotation.y = Math.PI / 2;
+    elbow.add(elbowRing);
+    var forearm = new THREE.Mesh(new THREE.CapsuleGeometry(0.075, 0.28, 8, 12), matSteel);
+    forearm.position.set(-side * 0.04, -0.18, 0.16);
+    forearm.rotation.x = -0.68;
+    forearm.rotation.z = -side * 0.12;
+    elbow.add(forearm);
+    var cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.10, 0.12, 14), matHull);
+    cuff.position.set(-side * 0.07, -0.29, 0.26);
+    cuff.rotation.x = -0.68;
+    elbow.add(cuff);
+    var handBall = new THREE.Mesh(new THREE.SphereGeometry(0.095, 12, 10), matHull);
+    handBall.position.set(-side * 0.08, -0.36, 0.34);
+    elbow.add(handBall);
+    [-1, 1].forEach(function (pr) {
+      var prong = new THREE.Mesh(new THREE.CapsuleGeometry(0.028, 0.11, 6, 10), matChrome);
+      prong.position.set(-side * 0.08 + pr * 0.06, -0.42, 0.42);
+      prong.rotation.x = -0.75;
+      prong.rotation.z = -pr * 0.22;
+      elbow.add(prong);
+    });
+    torsoGroup.add(shoulder);
+    return { shoulder: shoulder, elbow: elbow };
+  }
+  var armL = buildArm(-1);
+  var armR = buildArm(1);
+
+  // 6-stage articulated neck + hydraulic pistons
+  var neckBaseGroup = new THREE.Group();
+  neckBaseGroup.position.set(0, 1.13, -0.01);
+  torsoGroup.add(neckBaseGroup);
+  neckBaseGroup.add(new THREE.Mesh(new THREE.SphereGeometry(0.165, 16, 12), matSteel));
+  var neckV1 = new THREE.Group();
+  neckV1.position.set(0, 0.11, 0);
+  neckBaseGroup.add(neckV1);
+  neckV1.add(new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.21, 0.09, 18), matSteel));
+  var v1Bezel = new THREE.Mesh(new THREE.TorusGeometry(0.20, 0.018, 8, 18), matDarkNavy);
+  v1Bezel.rotation.x = Math.PI / 2;
+  neckV1.add(v1Bezel);
+  var neckV2 = new THREE.Group();
+  neckV2.position.set(0, 0.135, 0);
+  neckV1.add(neckV2);
+  neckV2.add(new THREE.Mesh(new THREE.CylinderGeometry(0.175, 0.19, 0.085, 18), matChrome));
+  var neckV3 = new THREE.Group();
+  neckV3.position.set(0, 0.13, 0);
+  neckV2.add(neckV3);
+  neckV3.add(new THREE.Mesh(new THREE.CylinderGeometry(0.165, 0.175, 0.08, 18), matSteel));
+  var headGroup = new THREE.Group();
+  headGroup.position.set(0, 0.13, 0.01);
+  neckV3.add(headGroup);
+  headGroup.add(new THREE.Mesh(new THREE.SphereGeometry(0.15, 16, 12), matChrome));
+
+  var pistons = [-1, 1].map(function (side) {
+    var baseAnchor = new THREE.Object3D();
+    baseAnchor.position.set(side * 0.29, 1.12, 0.06);
+    torsoGroup.add(baseAnchor);
+    var headAnchor = new THREE.Object3D();
+    headAnchor.position.set(side * 0.27, 0.02, 0.05);
+    headGroup.add(headAnchor);
+    var lowerCyl = new THREE.Mesh(new THREE.CylinderGeometry(0.044, 0.048, 0.24, 10), matDarkNavy);
+    lowerCyl.geometry.translate(0, 0.12, 0);
+    torsoGroup.add(lowerCyl);
+    var upperRod = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.36, 10), matChrome);
+    upperRod.geometry.translate(0, 0.18, 0);
+    torsoGroup.add(upperRod);
+    return { baseAnchor: baseAnchor, headAnchor: headAnchor, lowerCyl: lowerCyl, upperRod: upperRod };
+  });
+
+  var helmetCenterY = 0.50;
+  var helmet = new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 1.58, 1.14, 1.02, 0.36, 0.11), matHull);
+  helmet.position.set(0, helmetCenterY, 0);
+  headGroup.add(helmet);
+
+  var crownRidge = new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 0.54, 0.08, 0.72, 0.04, 0.02), matHullShade);
+  crownRidge.position.set(0, helmetCenterY + 0.56, -0.02);
+  headGroup.add(crownRidge);
+
+  var visorBezel = new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 1.30, 0.76, 0.14, 0.24, 0.03), matDarkNavy);
+  visorBezel.position.set(0, helmetCenterY - 0.02, 0.465);
+  headGroup.add(visorBezel);
+
+  var visorPlane = new THREE.Mesh(new THREE.PlaneGeometry(1.18, 0.65), matVisor);
+  visorPlane.position.set(0, helmetCenterY - 0.02, 0.542);
+  headGroup.add(visorPlane);
+
+  // Cool 3D Wayfarer sunglasses
+  var sunglassesGroup = new THREE.Group();
+  sunglassesGroup.position.set(0, helmetCenterY + 0.04, 0.575);
+  headGroup.add(sunglassesGroup);
+  var matShadeFrame = new THREE.MeshStandardMaterial({ color: '#070b14', metalness: 0.42, roughness: 0.16, envMapIntensity: 1.5 });
+  var matShadeLens = new THREE.MeshStandardMaterial({
+    color: '#030712', emissive: '#0c2340', emissiveIntensity: 0.22,
+    metalness: 0.68, roughness: 0.06, envMapIntensity: 2.3, transparent: true, opacity: 0.84,
+  });
+  var matShadeSheen = new THREE.MeshBasicMaterial({ color: '#e0f2fe', transparent: true, opacity: 0.28, depthWrite: false });
+  var matGoldPin = new THREE.MeshStandardMaterial({ color: '#facc15', emissive: '#ca8a04', emissiveIntensity: 0.35, metalness: 0.85, roughness: 0.18 });
+
+  function makeWayfarerLensShape(side) {
+    var s = new THREE.Shape();
+    var w = 0.52, h = 0.34;
+    if (side < 0) {
+      s.moveTo(-w * 0.54, h * 0.52);
+      s.lineTo(w * 0.46, h * 0.44);
+      s.quadraticCurveTo(w * 0.52, h * 0.42, w * 0.48, -h * 0.15);
+      s.quadraticCurveTo(w * 0.42, -h * 0.50, 0.02, -h * 0.50);
+      s.quadraticCurveTo(-w * 0.44, -h * 0.48, -w * 0.48, -h * 0.08);
+      s.quadraticCurveTo(-w * 0.56, h * 0.38, -w * 0.54, h * 0.52);
+    } else {
+      s.moveTo(w * 0.54, h * 0.52);
+      s.lineTo(-w * 0.46, h * 0.44);
+      s.quadraticCurveTo(-w * 0.52, h * 0.42, -w * 0.48, -h * 0.15);
+      s.quadraticCurveTo(-w * 0.42, -h * 0.50, -0.02, -h * 0.50);
+      s.quadraticCurveTo(w * 0.44, -h * 0.48, w * 0.48, -h * 0.08);
+      s.quadraticCurveTo(w * 0.56, h * 0.38, w * 0.54, h * 0.52);
+    }
+    return s;
+  }
+
+  [-1, 1].forEach(function (side) {
+    var outer = makeWayfarerLensShape(side);
+    var rim = new THREE.Shape();
+    outer.getPoints(18).forEach(function (pt, idx) {
+      var sx = pt.x * 1.19, sy = pt.y * 1.24 + 0.01;
+      if (idx === 0) rim.moveTo(sx, sy); else rim.lineTo(sx, sy);
+    });
+    rim.closePath();
+    var hole = new THREE.Path();
+    outer.getPoints(18).reverse().forEach(function (pt, idx) {
+      if (idx === 0) hole.moveTo(pt.x, pt.y); else hole.lineTo(pt.x, pt.y);
+    });
+    hole.closePath();
+    rim.holes.push(hole);
+    var frameGeo = new THREE.ExtrudeGeometry(rim, {
+      depth: 0.065, bevelEnabled: true, bevelSegments: 2, steps: 1, bevelSize: 0.016, bevelThickness: 0.016,
+    });
+    frameGeo.center();
+    var g = new THREE.Group();
+    g.position.set(side * 0.36, 0, 0);
+    g.add(new THREE.Mesh(frameGeo, matShadeFrame));
+    var lensMesh = new THREE.Mesh(new THREE.ShapeGeometry(outer, 16), matShadeLens);
+    lensMesh.position.z = 0.012;
+    g.add(lensMesh);
+    var sheen = new THREE.Mesh(new THREE.PlaneGeometry(0.075, 0.28), matShadeSheen);
+    sheen.position.set(-0.06, 0.01, 0.022);
+    sheen.rotation.z = -0.52;
+    g.add(sheen);
+    var pin = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.024, 0.02), matGoldPin);
+    pin.position.set(side * 0.285, 0.165, 0.046);
+    g.add(pin);
+    sunglassesGroup.add(g);
+  });
+
+  var shadeBridge = new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 0.24, 0.075, 0.07, 0.025, 0.012), matShadeFrame);
+  shadeBridge.position.set(0, 0.105, 0.004);
+  sunglassesGroup.add(shadeBridge);
+
+  [-1, 1].forEach(function (side) {
+    var temple = new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 0.055, 0.075, 0.64, 0.02, 0.01), matShadeFrame);
+    temple.position.set(side * 0.72, 0.11, -0.28);
+    temple.rotation.y = side * 0.14;
+    sunglassesGroup.add(temple);
+
+    var pod = new THREE.Group();
+    pod.position.set(side * 0.81, helmetCenterY - 0.02, 0.0);
+    var mount = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, 0.09, 16), matDarkNavy);
+    mount.rotation.z = Math.PI / 2;
+    pod.add(mount);
+    var housing = new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 0.20, 0.44, 0.30, 0.09, 0.035), matCyanArmor);
+    housing.position.x = side * 0.09;
+    pod.add(housing);
+    var ledRing = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.018, 8, 18), matCyanGlow);
+    ledRing.rotation.y = Math.PI / 2;
+    ledRing.position.x = side * 0.195;
+    pod.add(ledRing);
+    headGroup.add(pod);
+  });
+
+  var antennaBase = new THREE.Group();
+  antennaBase.position.set(0, helmetCenterY + 0.60, 0.0);
+  headGroup.add(antennaBase);
+  antennaBase.add(new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.15, 0.09, 14), matDarkNavy));
+  var antLowerRod = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.065, 0.24, 12), matSteel);
+  antLowerRod.position.y = 0.14;
+  antennaBase.add(antLowerRod);
+
+  var antennaMid = new THREE.Group();
+  antennaMid.position.set(0, 0.26, 0);
+  antennaBase.add(antennaMid);
+  antennaMid.add(new THREE.Mesh(new THREE.SphereGeometry(0.068, 12, 10), matChrome));
+  var antUpperRod = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.048, 0.22, 12), matSteel);
+  antUpperRod.position.y = 0.12;
+  antennaMid.add(antUpperRod);
+
+  var beaconOrb = new THREE.Mesh(new THREE.SphereGeometry(0.155, 16, 14), matBeacon);
+  beaconOrb.position.y = 0.34;
+  antennaMid.add(beaconOrb);
+
+  var beaconHalo = tbsGlowSprite(THREE, 'rgba(254, 240, 138, 0.95)', 'rgba(250, 204, 21, 0.5)');
+  beaconHalo.position.y = 0.34;
+  beaconHalo.scale.set(0.85, 0.85, 1);
+  antennaMid.add(beaconHalo);
+
+  var vA = new THREE.Vector3(), vB = new THREE.Vector3(), vDir = new THREE.Vector3(), vNeg = new THREE.Vector3();
+  var yAxis = new THREE.Vector3(0, 1, 0), invTorso = new THREE.Matrix4();
+  function updatePistons() {
+    root.updateMatrixWorld(true);
+    invTorso.copy(torsoGroup.matrixWorld).invert();
+    for (var i = 0; i < pistons.length; i++) {
+      var p = pistons[i];
+      p.baseAnchor.getWorldPosition(vA).applyMatrix4(invTorso);
+      p.headAnchor.getWorldPosition(vB).applyMatrix4(invTorso);
+      vDir.subVectors(vB, vA);
+      var len = Math.max(0.05, vDir.length());
+      vDir.normalize();
+      p.lowerCyl.position.copy(vA);
+      p.lowerCyl.quaternion.setFromUnitVectors(yAxis, vDir);
+      p.upperRod.position.copy(vB);
+      vNeg.copy(vDir).negate();
+      p.upperRod.quaternion.setFromUnitVectors(yAxis, vNeg);
+      p.upperRod.scale.set(1, Math.min(1.4, (len * 0.82) / 0.36), 1);
+    }
+  }
+  updatePistons();
+
+  // Scale Nova-7 into the shared camera frustum with feet at y = 0
+  var scale = 0.40;
+  root.scale.setScalar(scale);
+  root.position.y = 0.24 * scale;
+
+  function applyPose(p3) {
+    bodyRoot.position.set(p3.bodyX / scale, p3.bodyY / scale, 0);
+    bodyRoot.rotation.set(p3.bodyRx, p3.bodyRy, p3.bodyRz);
+
+    var nIso = Math.sin((p3.step || 0) * Math.PI * 2) * 0.32 + (p3.worried ? Math.sin((p3.step || 0) * 20) * 0.2 : 0);
+    neckBaseGroup.rotation.z = nIso * 0.22;
+    neckBaseGroup.rotation.x = p3.headRx * 0.22;
+    neckV1.rotation.z = nIso * 0.18;
+    neckV2.rotation.z = -nIso * 0.14;
+    neckV3.rotation.z = -nIso * 0.18;
+    headGroup.rotation.set(p3.headRx, p3.headRy, p3.headRz);
+    antennaBase.rotation.z = -nIso * 0.22 - p3.headRz * 0.5;
+    antennaMid.rotation.z = -nIso * 0.30 - p3.headRz * 0.65;
+
+    armL.shoulder.rotation.set(p3.armLRx - 0.18, 0, p3.armLRz - 0.12);
+    armL.elbow.rotation.set(-0.35 - Math.max(0, -p3.armLRz) * 0.2, 0, 0);
+    armR.shoulder.rotation.set(p3.armRRx - 0.18, 0, p3.armRRz + 0.12);
+    armR.elbow.rotation.set(-0.35 - Math.max(0, p3.armRRz) * 0.2, 0, 0);
+
+    legL.hip.rotation.set(p3.legLRx, 0, p3.legLRz);
+    legL.knee.rotation.x = Math.max(0, -p3.legLRx * 0.75);
+    legL.ankle.rotation.x = -p3.legLRx * 0.35;
+    legR.hip.rotation.set(p3.legRRx, 0, p3.legRRz);
+    legR.knee.rotation.x = Math.max(0, -p3.legRRx * 0.75);
+    legR.ankle.rotation.x = -p3.legRRx * 0.35;
+
+    var beatGlow = Math.max(p3.hit || 0, (p3.arm || 0) * 0.65);
+    beaconOrb.scale.setScalar(1.0 + beatGlow * 0.26);
+    beaconHalo.scale.setScalar(0.75 + beatGlow * 0.65);
+    shadow.material.opacity = p3.shadowOp * 2.6;
+    updatePistons();
+    drawVisor(p3.energy || 0.6, p3.arm || 0, beatGlow, p3.worried);
+  }
+
+  return {
+    group: root,
+    head: headGroup,
+    legL: legL.hip,
+    legR: legR.hip,
+    armL: armL.shoulder,
+    armR: armR.shoulder,
+    shadow: shadow,
+    flame: null,
+    sweatPos: [0.92, 0.72, 0.45],
+    sweatScale: 2.2,
+    applyPose: applyPose,
+  };
+}
+
+/**
+ * 3D PBR Glitch ('glitch'): purple chamfered CRT monitor head with green phosphor scanline
+ * screen & emerald pixel face, bent lightning antenna with floating rotating emerald pixel
+ * cube, chromatic RGB split ghost shells, corrugated purple arms with emerald claw pincers,
+ * and articulated twin tread-pod legs with 4 rotating spoked bogie wheels.
+ */
+function tbsCreateGlitch(THREE) {
+  var matPurpleCase = new THREE.MeshStandardMaterial({ color: '#a78bfa', metalness: 0.32, roughness: 0.24, envMapIntensity: 1.25 });
+  var matDeepPurple = new THREE.MeshStandardMaterial({ color: '#6d28d9', metalness: 0.38, roughness: 0.30 });
+  var matPurpleArm = new THREE.MeshStandardMaterial({ color: '#8b5cf6', metalness: 0.45, roughness: 0.28 });
+  var matDarkNavy = new THREE.MeshStandardMaterial({ color: '#0b1530', metalness: 0.45, roughness: 0.40 });
+  var matTrack = new THREE.MeshStandardMaterial({ color: '#1e293b', metalness: 0.55, roughness: 0.42 });
+  var matSteel = new THREE.MeshStandardMaterial({ color: '#cbd5e1', metalness: 0.85, roughness: 0.22 });
+  var matEmerald = new THREE.MeshStandardMaterial({ color: '#34d399', emissive: '#10b981', emissiveIntensity: 1.5, metalness: 0.15, roughness: 0.18 });
+  var matYellowLed = new THREE.MeshStandardMaterial({ color: '#facc15', emissive: '#facc15', emissiveIntensity: 1.4 });
+  var matCyanLed = new THREE.MeshStandardMaterial({ color: '#38bdf8', emissive: '#38bdf8', emissiveIntensity: 1.4 });
+  var matGhostCoral = new THREE.MeshBasicMaterial({ color: '#fb7185', transparent: true, opacity: 0.0, depthWrite: false });
+  var matGhostCyan = new THREE.MeshBasicMaterial({ color: '#38bdf8', transparent: true, opacity: 0.0, depthWrite: false });
+
+  var cTc = tbsMakeTexCanvas(THREE, 256, 208);
+  var lastCrtKey = '';
+  function drawCrt(energy, accent, beatGlow, scanStep, worried) {
+    if (!cTc.ctx) return;
+    var key = Math.round(energy * 5) + ':' + Math.round(accent * 5) + ':' + Math.round(beatGlow * 6) + ':' + (scanStep & 15) + ':' + (worried ? 1 : 0);
+    if (key === lastCrtKey) return;
+    lastCrtKey = key;
+    var ctx = cTc.ctx;
+    ctx.clearRect(0, 0, 256, 208);
+    var bg = ctx.createLinearGradient(0, 0, 0, 208);
+    bg.addColorStop(0, '#0f172a');
+    bg.addColorStop(1, '#040711');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, 256, 208);
+    ctx.fillStyle = 'rgba(52, 211, 153, 0.09)';
+    for (var y = 4; y < 208; y += 6) ctx.fillRect(0, y, 256, 1.5);
+    var scanY = ((scanStep * 11) % 180) + 14;
+    ctx.fillStyle = 'rgba(196, 181, 253, ' + (0.22 + beatGlow * 0.35).toFixed(2) + ')';
+    ctx.fillRect(8, scanY, 240, 6);
+
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.25)';
+    ctx.lineWidth = 4.5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(23, 18);
+    ctx.quadraticCurveTo(128, 7, 233, 20);
+    ctx.stroke();
+
+    ctx.save();
+    ctx.shadowColor = '#34d399';
+    ctx.shadowBlur = 8 + beatGlow * 10;
+    if (accent > 0.65 || worried) {
+      ctx.strokeStyle = '#34d399';
+      ctx.lineWidth = 11;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(53, 54);
+      ctx.lineTo(94, 74);
+      ctx.lineTo(53, 94);
+      ctx.moveTo(203, 54);
+      ctx.lineTo(162, 74);
+      ctx.lineTo(203, 94);
+      ctx.stroke();
+    } else {
+      var eyeS = 39 + beatGlow * 4;
+      var eyeH = 37 - accent * 8;
+      [76, 180].forEach(function (cx) {
+        ctx.fillStyle = '#34d399';
+        ctx.fillRect(cx - eyeS / 2, 72 - eyeH / 2, eyeS, eyeH);
+        ctx.fillStyle = '#ecfdf5';
+        ctx.fillRect(cx - eyeS / 2 + 7, 72 - eyeH / 2 + 7, 11, 11);
+      });
+    }
+    var stepH = (worried ? -10 : 1) * (9 + beatGlow * 7 + energy * 5);
+    var my = 146;
+    ctx.strokeStyle = '#34d399';
+    ctx.lineWidth = 9;
+    ctx.lineCap = 'square';
+    ctx.lineJoin = 'miter';
+    ctx.beginPath();
+    ctx.moveTo(64, my);
+    ctx.lineTo(88, my);
+    ctx.lineTo(88, my + stepH);
+    ctx.lineTo(113, my + stepH);
+    ctx.lineTo(113, my - stepH * 0.4);
+    ctx.lineTo(143, my - stepH * 0.4);
+    ctx.lineTo(143, my + stepH);
+    ctx.lineTo(168, my + stepH);
+    ctx.lineTo(168, my);
+    ctx.lineTo(192, my);
+    ctx.stroke();
+    ctx.restore();
+    cTc.texture.needsUpdate = true;
+  }
+  drawCrt(0.5, 0, 0, 0, false);
+
+  var matCrt = new THREE.MeshStandardMaterial({
+    map: cTc.texture,
+    emissive: '#ffffff',
+    emissiveMap: cTc.texture,
+    emissiveIntensity: 0.95,
+    roughness: 0.08,
+    metalness: 0.22,
+  });
+
+  var root = new THREE.Group();
+  var shadow = tbsContactShadowMesh(THREE, 1.05, 'rgba(167, 139, 250, 0.18)');
+  shadow.position.set(0, -0.24, 0.02);
+  root.add(shadow);
+
+  var bodyRoot = new THREE.Group();
+  root.add(bodyRoot);
+
+  var pelvis = new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 0.96, 0.24, 0.56, 0.10, 0.03), matTrack);
+  pelvis.position.set(0, 0.84, 0);
+  bodyRoot.add(pelvis);
+
+  var wheels = [];
+  function buildGlitchLeg(side) {
+    var hip = new THREE.Group();
+    hip.position.set(side * 0.30, 0.78, 0);
+    var thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.105, 0.32, 8, 12), matPurpleArm);
+    thigh.position.set(side * 0.03, -0.20, 0);
+    thigh.rotation.z = -side * 0.06;
+    hip.add(thigh);
+    var knee = new THREE.Group();
+    knee.position.set(side * 0.05, -0.42, 0.02);
+    hip.add(knee);
+    knee.add(new THREE.Mesh(new THREE.SphereGeometry(0.125, 12, 10), matPurpleCase));
+    var kneeLed = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.042, 0.05, 12), matEmerald);
+    kneeLed.rotation.x = Math.PI / 2;
+    kneeLed.position.set(0, 0, 0.115);
+    knee.add(kneeLed);
+    var shin = new THREE.Mesh(new THREE.CapsuleGeometry(0.098, 0.30, 8, 12), matSteel);
+    shin.position.set(-side * 0.02, -0.22, -0.02);
+    knee.add(shin);
+    var ankle = new THREE.Group();
+    ankle.position.set(-side * 0.02, -0.45, 0.04);
+    knee.add(ankle);
+    ankle.add(new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 0.38, 0.24, 0.54, 0.10, 0.03), matTrack));
+    var bootTrim = new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 0.30, 0.07, 0.44, 0.03, 0.015), matPurpleCase);
+    bootTrim.position.set(0, 0.13, 0);
+    ankle.add(bootTrim);
+    [-0.14, 0.14].forEach(function (wz) {
+      var wg = new THREE.Group();
+      wg.position.set(side * 0.18, -0.02, wz);
+      var rim = new THREE.Mesh(new THREE.TorusGeometry(0.085, 0.018, 8, 14), matSteel);
+      rim.rotation.y = Math.PI / 2;
+      wg.add(rim);
+      wg.add(new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.15, 0.025), matSteel));
+      wg.add(new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.025, 0.15), matSteel));
+      var hub = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.038, 0.05, 10), matEmerald);
+      hub.rotation.z = Math.PI / 2;
+      wg.add(hub);
+      ankle.add(wg);
+      wheels.push(wg);
+    });
+    var toeGlow = new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 0.24, 0.08, 0.06, 0.03, 0.01), matEmerald);
+    toeGlow.position.set(0, -0.02, 0.26);
+    ankle.add(toeGlow);
+    bodyRoot.add(hip);
+    return { hip: hip, knee: knee, ankle: ankle };
+  }
+  var legL = buildGlitchLeg(-1);
+  var legR = buildGlitchLeg(1);
+
+  var torsoGroup = new THREE.Group();
+  torsoGroup.position.set(0, 0.94, 0);
+  bodyRoot.add(torsoGroup);
+
+  var arcadeWaist = new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 0.92, 0.48, 0.56, 0.12, 0.04), matDeepPurple);
+  arcadeWaist.position.set(0, 0.24, 0);
+  torsoGroup.add(arcadeWaist);
+  var arcadePanel = new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 0.64, 0.24, 0.06, 0.05, 0.015), matDarkNavy);
+  arcadePanel.position.set(0, 0.24, 0.27);
+  torsoGroup.add(arcadePanel);
+  var led1 = new THREE.Mesh(new THREE.SphereGeometry(0.042, 10, 10), matEmerald);
+  led1.position.set(-0.18, 0.24, 0.305);
+  torsoGroup.add(led1);
+  var led2 = new THREE.Mesh(new THREE.SphereGeometry(0.042, 10, 10), matYellowLed);
+  led2.position.set(-0.04, 0.24, 0.305);
+  torsoGroup.add(led2);
+  var led3 = new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 0.18, 0.075, 0.04, 0.02, 0.01), matCyanLed);
+  led3.position.set(0.14, 0.24, 0.30);
+  torsoGroup.add(led3);
+
+  function buildGlitchArm(side) {
+    var shoulder = new THREE.Group();
+    shoulder.position.set(side * 0.78, 0.72, 0.02);
+    shoulder.add(new THREE.Mesh(new THREE.SphereGeometry(0.16, 14, 12), matPurpleCase));
+    var upperArm = new THREE.Mesh(new THREE.CapsuleGeometry(0.085, 0.32, 8, 12), matPurpleArm);
+    upperArm.position.set(side * 0.14, -0.20, 0.02);
+    upperArm.rotation.z = side * 0.32;
+    shoulder.add(upperArm);
+    var elbow = new THREE.Group();
+    elbow.position.set(side * 0.26, -0.40, 0.04);
+    shoulder.add(elbow);
+    elbow.add(new THREE.Mesh(new THREE.SphereGeometry(0.115, 12, 10), matSteel));
+    var forearm = new THREE.Mesh(new THREE.CapsuleGeometry(0.078, 0.26, 8, 12), matPurpleArm);
+    forearm.position.set(-side * 0.04, -0.18, 0.15);
+    forearm.rotation.x = -0.65;
+    elbow.add(forearm);
+    var wrist = new THREE.Mesh(new THREE.SphereGeometry(0.10, 12, 10), matSteel);
+    wrist.position.set(-side * 0.06, -0.34, 0.31);
+    elbow.add(wrist);
+    [-1, 1].forEach(function (pr) {
+      var pincer = new THREE.Mesh(new THREE.CapsuleGeometry(0.032, 0.13, 6, 10), matEmerald);
+      pincer.position.set(-side * 0.06 + pr * 0.065, -0.41, 0.40);
+      pincer.rotation.x = -0.75;
+      pincer.rotation.z = -pr * 0.26;
+      elbow.add(pincer);
+    });
+    torsoGroup.add(shoulder);
+    return { shoulder: shoulder, elbow: elbow };
+  }
+  var armL = buildGlitchArm(-1);
+  var armR = buildGlitchArm(1);
+
+  var neckJoint = new THREE.Group();
+  neckJoint.position.set(0, 0.52, 0);
+  torsoGroup.add(neckJoint);
+  neckJoint.add(new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 0.14, 16), matDarkNavy));
+
+  var headGroup = new THREE.Group();
+  headGroup.position.set(0, 0.10, 0);
+  neckJoint.add(headGroup);
+
+  var crtHead = new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 1.54, 1.28, 1.06, 0.24, 0.09), matPurpleCase);
+  crtHead.position.set(0, 0.64, 0);
+  headGroup.add(crtHead);
+
+  var ghostGeo = tbsExtrudedRoundedBox(THREE, 1.56, 1.30, 1.04, 0.24, 0.06);
+  var ghostCoral = new THREE.Mesh(ghostGeo, matGhostCoral);
+  var ghostCyan = new THREE.Mesh(ghostGeo, matGhostCyan);
+  ghostCoral.position.set(-0.14, 0.60, -0.04);
+  ghostCyan.position.set(0.14, 0.68, -0.04);
+  headGroup.add(ghostCoral);
+  headGroup.add(ghostCyan);
+
+  var backCrtVent = new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 1.05, 0.78, 0.12, 0.12, 0.03), matDeepPurple);
+  backCrtVent.position.set(0, 0.64, -0.51);
+  headGroup.add(backCrtVent);
+  var backLogoCube = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.24, 0.08), matEmerald);
+  backLogoCube.position.set(0, 0.64, -0.56);
+  backLogoCube.rotation.z = Math.PI / 4;
+  headGroup.add(backLogoCube);
+
+  var screenBezel = new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 1.26, 1.00, 0.12, 0.15, 0.03), matDarkNavy);
+  screenBezel.position.set(0, 0.64, 0.49);
+  headGroup.add(screenBezel);
+
+  var screenPlane = new THREE.Mesh(new THREE.PlaneGeometry(1.16, 0.90), matCrt);
+  screenPlane.position.set(0, 0.64, 0.555);
+  headGroup.add(screenPlane);
+
+  var antennaGroup = new THREE.Group();
+  antennaGroup.position.set(-0.16, 1.28, 0);
+  headGroup.add(antennaGroup);
+  var seg1 = new THREE.Mesh(new THREE.CapsuleGeometry(0.038, 0.24, 6, 10), matPurpleCase);
+  seg1.position.set(-0.08, 0.11, 0);
+  seg1.rotation.z = 0.52;
+  antennaGroup.add(seg1);
+  var seg2 = new THREE.Mesh(new THREE.CapsuleGeometry(0.034, 0.20, 6, 10), matPurpleCase);
+  seg2.position.set(0.01, 0.23, 0);
+  seg2.rotation.z = -1.15;
+  antennaGroup.add(seg2);
+  var seg3 = new THREE.Mesh(new THREE.CapsuleGeometry(0.030, 0.16, 6, 10), matPurpleCase);
+  seg3.position.set(0.04, 0.34, 0);
+  seg3.rotation.z = 0.45;
+  antennaGroup.add(seg3);
+
+  var pixelCube = new THREE.Mesh(new THREE.BoxGeometry(0.21, 0.21, 0.21), matEmerald);
+  pixelCube.position.set(0.02, 0.52, 0);
+  antennaGroup.add(pixelCube);
+  var cubeHalo = tbsGlowSprite(THREE, 'rgba(167, 243, 208, 0.9)', 'rgba(52, 211, 153, 0.45)');
+  cubeHalo.position.set(0.02, 0.52, 0);
+  cubeHalo.scale.set(0.75, 0.75, 1);
+  antennaGroup.add(cubeHalo);
+
+  var scale = 0.47;
+  root.scale.setScalar(scale);
+  root.position.y = 0.24 * scale;
+
+  function applyPose(p3) {
+    bodyRoot.position.set(p3.bodyX / scale, p3.bodyY / scale, 0);
+    bodyRoot.rotation.set(p3.bodyRx, p3.bodyRy, p3.bodyRz);
+
+    neckJoint.rotation.z = p3.headRz * 0.35;
+    headGroup.rotation.set(p3.headRx, p3.headRy, p3.headRz);
+
+    legL.hip.rotation.set(p3.legLRx, 0, p3.legLRz);
+    legL.knee.rotation.x = Math.max(0, -p3.legLRx * 0.7);
+    legL.ankle.rotation.x = -p3.legLRx * 0.3;
+    legR.hip.rotation.set(p3.legRRx, 0, p3.legRRz);
+    legR.knee.rotation.x = Math.max(0, -p3.legRRx * 0.7);
+    legR.ankle.rotation.x = -p3.legRRx * 0.3;
+
+    var wheelAngle = (p3.wheel || 0) * Math.PI / 180;
+    for (var i = 0; i < wheels.length; i++) wheels[i].rotation.x = wheelAngle;
+
+    armL.shoulder.rotation.set(p3.armLRx - 0.18, 0, p3.armLRz - 0.12);
+    armL.elbow.rotation.set(-0.35 - Math.max(0, -p3.armLRz) * 0.2, 0, 0);
+    armR.shoulder.rotation.set(p3.armRRx - 0.18, 0, p3.armRRz + 0.12);
+    armR.elbow.rotation.set(-0.35 - Math.max(0, p3.armRRz) * 0.2, 0, 0);
+
+    var beatGlow = Math.max(p3.hit || 0, (p3.arm || 0) * 0.6);
+    var spin = (p3.step || 0) * Math.PI * 2 + wheelAngle * 0.4;
+    pixelCube.rotation.y = spin;
+    pixelCube.rotation.x = spin * 0.7;
+    pixelCube.position.y = 0.52 + beatGlow * 0.08;
+    cubeHalo.position.y = pixelCube.position.y;
+    antennaGroup.rotation.z = -p3.headRz * 0.45;
+
+    var glitchFlash = Math.max(0, (p3.jitter || 0) * 0.7 + (p3.arm || 0) * 0.35 - 0.2);
+    matGhostCoral.opacity = Math.min(0.34, glitchFlash * 0.55);
+    matGhostCyan.opacity = Math.min(0.34, glitchFlash * 0.55);
+    ghostCoral.position.x = -0.10 - glitchFlash * 0.14;
+    ghostCyan.position.x = 0.10 + glitchFlash * 0.14;
+
+    shadow.material.opacity = p3.shadowOp * 2.6;
+    drawCrt(p3.energy || 0.6, Math.max(p3.arm || 0, p3.jitter || 0), beatGlow, Math.floor(Math.abs(p3.wheel || 0) / 18), p3.worried);
+  }
+
+  return {
+    group: root,
+    head: headGroup,
+    legL: legL.hip,
+    legR: legR.hip,
+    armL: armL.shoulder,
+    armR: armR.shoulder,
+    shadow: shadow,
+    flame: null,
+    sweatPos: [0.90, 0.90, 0.45],
+    sweatScale: 1.9,
+    applyPose: applyPose,
+  };
+}
+
+/**
+ * 3D PBR Prof. Byte ('dizzy'): emerald lab-coat robot with white V-shirt & coral bow tie,
+ * breast pocket pens, oversized brass round spectacles with droopy bored eyelids, sculpted
+ * white handlebar mustache, riveted collar & translucent glass bell-jar dome with floating
+ * bi-lobed pink brain, standing/rolling on articulated loafers (without barstool/table so
+ * he moves freely in Board Crash) while holding and sipping his 3D Martini with olive.
+ */
+function tbsCreateProfByte(THREE) {
+  var matCoat = new THREE.MeshStandardMaterial({ color: '#10b981', metalness: 0.22, roughness: 0.32 });
+  var matDarkCoat = new THREE.MeshStandardMaterial({ color: '#047857', metalness: 0.25, roughness: 0.38 });
+  var matWhite = new THREE.MeshStandardMaterial({ color: '#f8fafc', metalness: 0.1, roughness: 0.28 });
+  var matBrass = new THREE.MeshStandardMaterial({ color: '#facc15', emissive: '#b45309', emissiveIntensity: 0.22, metalness: 0.86, roughness: 0.18, envMapIntensity: 1.6 });
+  var matSteel = new THREE.MeshStandardMaterial({ color: '#94a3b8', metalness: 0.82, roughness: 0.24 });
+  var matDarkNavy = new THREE.MeshStandardMaterial({ color: '#0b1530', metalness: 0.4, roughness: 0.42 });
+  var matCoral = new THREE.MeshStandardMaterial({ color: '#fb7185', emissive: '#be123c', emissiveIntensity: 0.2, metalness: 0.18, roughness: 0.28 });
+  var matBrain = new THREE.MeshStandardMaterial({ color: '#fb7185', emissive: '#9f1239', emissiveIntensity: 0.32, metalness: 0.12, roughness: 0.36 });
+  var matGlassDome = new THREE.MeshStandardMaterial({
+    color: '#bae6fd', emissive: '#0284c7', emissiveIntensity: 0.15,
+    metalness: 0.2, roughness: 0.06, envMapIntensity: 2.2, transparent: true, opacity: 0.36, depthWrite: false,
+  });
+  var matCyanGlow = new THREE.MeshStandardMaterial({ color: '#38bdf8', emissive: '#38bdf8', emissiveIntensity: 1.5 });
+
+  var eTc = tbsMakeTexCanvas(THREE, 128, 128);
+  var lastEyeKey = '';
+  function drawSpectacles(lookX, eyelidClose, worried) {
+    if (!eTc.ctx) return;
+    var key = Math.round(lookX * 10) + ':' + Math.round(eyelidClose * 12) + ':' + (worried ? 1 : 0);
+    if (key === lastEyeKey) return;
+    lastEyeKey = key;
+    var ctx = eTc.ctx;
+    ctx.clearRect(0, 0, 128, 128);
+    ctx.fillStyle = '#091226';
+    ctx.fillRect(0, 0, 128, 128);
+    var px = 64 + lookX * 20;
+    var py = worried ? 64 : 68;
+    ctx.save();
+    ctx.shadowColor = '#7dd3fc';
+    ctx.shadowBlur = 5;
+    ctx.fillStyle = '#7dd3fc';
+    ctx.beginPath();
+    ctx.arc(px, py, worried ? 20 : 17, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.beginPath();
+    ctx.arc(px - 5, py - 5, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.strokeStyle = 'rgba(15, 118, 110, 0.55)';
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(64, 67, 39, Math.PI * 0.18, Math.PI * 0.82);
+    ctx.stroke();
+
+    var lidY = worried ? 28 : Math.min(118, Math.max(40, 21 + eyelidClose * 86));
+    var lidGrad = ctx.createLinearGradient(0, 0, 0, lidY);
+    lidGrad.addColorStop(0, '#047857');
+    lidGrad.addColorStop(0.85, '#059669');
+    lidGrad.addColorStop(1, '#064e3b');
+    ctx.fillStyle = lidGrad;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(128, 0);
+    ctx.lineTo(128, lidY + 7);
+    ctx.quadraticCurveTo(64, lidY - 4, 0, lidY + 4);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.strokeStyle = '#0b1530';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(0, lidY + 4);
+    ctx.quadraticCurveTo(64, lidY - 4, 128, lidY + 7);
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(29, 36);
+    ctx.lineTo(59, 24);
+    ctx.stroke();
+    eTc.texture.needsUpdate = true;
+  }
+  drawSpectacles(0.2, 0.56, false);
+
+  var matEyeLens = new THREE.MeshStandardMaterial({
+    map: eTc.texture,
+    emissive: '#ffffff',
+    emissiveMap: eTc.texture,
+    emissiveIntensity: 0.85,
+    roughness: 0.1,
+    metalness: 0.2,
+  });
+
+  var root = new THREE.Group();
+  var shadow = tbsContactShadowMesh(THREE, 0.95, 'rgba(16, 185, 129, 0.18)');
+  shadow.position.set(0, -0.24, 0.02);
+  root.add(shadow);
+
+  var bodyRoot = new THREE.Group();
+  root.add(bodyRoot);
+
+  // Standing / pedaling legs with dark emerald coat thighs, steel shins & brass-buckled loafers
+  function buildByteLeg(side) {
+    var hip = new THREE.Group();
+    hip.position.set(side * 0.26, 0.72, 0);
+    var thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.28, 8, 12), matDarkCoat);
+    thigh.position.set(0, -0.18, 0);
+    hip.add(thigh);
+    var knee = new THREE.Group();
+    knee.position.set(0, -0.38, 0.02);
+    hip.add(knee);
+    knee.add(new THREE.Mesh(new THREE.SphereGeometry(0.10, 12, 10), matSteel));
+    var shin = new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.26, 8, 12), matSteel);
+    shin.position.set(0, -0.18, -0.02);
+    knee.add(shin);
+    var ankle = new THREE.Group();
+    ankle.position.set(0, -0.38, 0.02);
+    knee.add(ankle);
+    var shoe = new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 0.26, 0.16, 0.40, 0.06, 0.02), matDarkNavy);
+    shoe.position.set(0, -0.02, 0.05);
+    ankle.add(shoe);
+    var buckle = new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 0.16, 0.05, 0.06, 0.015, 0.008), matBrass);
+    buckle.position.set(0, 0.05, 0.14);
+    ankle.add(buckle);
+    bodyRoot.add(hip);
+    return { hip: hip, knee: knee, ankle: ankle };
+  }
+  var byteLegL = buildByteLeg(-1);
+  var byteLegR = buildByteLeg(1);
+
+  var torsoGroup = new THREE.Group();
+  torsoGroup.position.set(0, 0.78, 0);
+  bodyRoot.add(torsoGroup);
+
+  var coatMesh = new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 1.12, 0.98, 0.76, 0.26, 0.08), matCoat);
+  coatMesh.position.set(0, 0.49, 0);
+  torsoGroup.add(coatMesh);
+
+  var shirtV = new THREE.Mesh(new THREE.ConeGeometry(0.26, 0.34, 4), matWhite);
+  shirtV.rotation.x = Math.PI;
+  shirtV.rotation.y = Math.PI / 4;
+  shirtV.scale.set(1.1, 1, 0.3);
+  shirtV.position.set(0, 0.18, 0.35);
+  torsoGroup.add(shirtV);
+
+  var bowL = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.18, 12), matCoral);
+  bowL.rotation.z = -Math.PI / 2;
+  bowL.position.set(-0.08, 0.18, 0.40);
+  torsoGroup.add(bowL);
+  var bowR = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.18, 12), matCoral);
+  bowR.rotation.z = Math.PI / 2;
+  bowR.position.set(0.08, 0.18, 0.40);
+  torsoGroup.add(bowR);
+  var bowKnot = new THREE.Mesh(new THREE.SphereGeometry(0.048, 10, 10), matCoral);
+  bowKnot.position.set(0, 0.18, 0.41);
+  torsoGroup.add(bowKnot);
+
+  var pocket = new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 0.20, 0.16, 0.05, 0.03, 0.01), matWhite);
+  pocket.position.set(0.32, 0.36, 0.375);
+  torsoGroup.add(pocket);
+  var penCyan = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.12, 8), matCyanGlow);
+  penCyan.position.set(0.28, 0.44, 0.38);
+  torsoGroup.add(penCyan);
+  var penGold = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.11, 8), matBrass);
+  penGold.position.set(0.35, 0.43, 0.38);
+  torsoGroup.add(penGold);
+
+  var faceGroup = new THREE.Group();
+  faceGroup.position.set(0, 0.66, 0.39);
+  torsoGroup.add(faceGroup);
+
+  [-1, 1].forEach(function (side) {
+    var specRing = new THREE.Mesh(new THREE.TorusGeometry(0.195, 0.032, 12, 24), matBrass);
+    specRing.position.set(side * 0.235, 0, 0);
+    faceGroup.add(specRing);
+    var lensPlane = new THREE.Mesh(new THREE.CircleGeometry(0.182, 22), matEyeLens);
+    lensPlane.position.set(side * 0.235, 0, -0.005);
+    faceGroup.add(lensPlane);
+  });
+  var specBridge = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.10, 8), matBrass);
+  specBridge.rotation.z = Math.PI / 2;
+  specBridge.position.set(0, 0.02, 0.01);
+  faceGroup.add(specBridge);
+
+  var mShape = new THREE.Shape();
+  mShape.moveTo(-0.46, -0.02);
+  mShape.quadraticCurveTo(-0.24, 0.14, 0.0, 0.02);
+  mShape.quadraticCurveTo(0.24, 0.14, 0.46, -0.02);
+  mShape.quadraticCurveTo(0.24, -0.18, 0.0, -0.05);
+  mShape.quadraticCurveTo(-0.24, -0.18, -0.46, -0.02);
+  var mustacheGeo = new THREE.ExtrudeGeometry(mShape, {
+    depth: 0.08, bevelEnabled: true, bevelSegments: 3, steps: 1, bevelSize: 0.022, bevelThickness: 0.022,
+  });
+  mustacheGeo.center();
+  var mustache = new THREE.Mesh(mustacheGeo, matWhite);
+  mustache.position.set(0, -0.25, 0.03);
+  faceGroup.add(mustache);
+
+  // Riveted collar & glass bell-jar dome with floating pink brain
+  var domeGroup = new THREE.Group();
+  domeGroup.position.set(0, 0.99, 0);
+  torsoGroup.add(domeGroup);
+  domeGroup.add(new THREE.Mesh(new THREE.CylinderGeometry(0.64, 0.66, 0.18, 24), matSteel));
+  for (var i = 0; i < 8; i++) {
+    var a = (i / 8) * Math.PI * 2;
+    var riv = new THREE.Mesh(new THREE.SphereGeometry(0.036, 8, 8), matBrass);
+    riv.position.set(Math.sin(a) * 0.65, 0, Math.cos(a) * 0.65);
+    domeGroup.add(riv);
+  }
+  var brainGroup = new THREE.Group();
+  brainGroup.position.set(0, 0.34, 0);
+  domeGroup.add(brainGroup);
+  var lobeGeo = new THREE.SphereGeometry(0.24, 16, 14);
+  var lobeL = new THREE.Mesh(lobeGeo, matBrain);
+  lobeL.scale.set(0.95, 1.05, 1.25);
+  lobeL.position.set(-0.14, 0, 0);
+  brainGroup.add(lobeL);
+  var lobeR = new THREE.Mesh(lobeGeo, matBrain);
+  lobeR.scale.set(0.95, 1.05, 1.25);
+  lobeR.position.set(0.14, 0, 0);
+  brainGroup.add(lobeR);
+  [-0.16, 0, 0.16].forEach(function (bx, idx) {
+    var fold = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.038, 8, 16), matBrain);
+    fold.position.set(bx, 0.06, (idx - 1) * 0.04);
+    fold.rotation.y = 0.4 * (idx - 1);
+    brainGroup.add(fold);
+  });
+  var syn1 = new THREE.Mesh(new THREE.SphereGeometry(0.038, 8, 8), matBrass);
+  syn1.position.set(-0.16, 0.14, 0.22);
+  brainGroup.add(syn1);
+  var syn2 = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 8), matCyanGlow);
+  syn2.position.set(0.18, 0.18, 0.20);
+  brainGroup.add(syn2);
+
+  var bellJar = new THREE.Mesh(
+    new THREE.SphereGeometry(0.60, 24, 18, 0, Math.PI * 2, 0, Math.PI * 0.52),
+    matGlassDome
+  );
+  bellJar.scale.set(1, 1.12, 1);
+  bellJar.position.y = 0.04;
+  domeGroup.add(bellJar);
+
+  var domeSheen = new THREE.Mesh(
+    new THREE.TorusGeometry(0.48, 0.022, 8, 18, Math.PI * 0.42),
+    new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.55 })
+  );
+  domeSheen.position.set(-0.12, 0.24, 0.22);
+  domeSheen.rotation.set(-0.35, -0.45, 0.55);
+  domeGroup.add(domeSheen);
+
+  // Left arm (articulated shoulder + sleeve + white gloved hand)
+  var shoulderL = new THREE.Group();
+  shoulderL.position.set(-0.58, 0.62, 0.04);
+  torsoGroup.add(shoulderL);
+  shoulderL.add(new THREE.Mesh(new THREE.SphereGeometry(0.14, 12, 10), matDarkCoat));
+  var sleeveL = new THREE.Mesh(new THREE.CapsuleGeometry(0.085, 0.30, 8, 12), matCoat);
+  sleeveL.position.set(-0.16, -0.18, 0.06);
+  sleeveL.rotation.z = -0.45;
+  sleeveL.rotation.x = -0.22;
+  shoulderL.add(sleeveL);
+  var handL = new THREE.Mesh(new THREE.SphereGeometry(0.115, 12, 10), matWhite);
+  handL.position.set(-0.30, -0.34, 0.14);
+  shoulderL.add(handL);
+
+  // Right arm holding the 3D Martini Glass with Green Olive & Gold Pick
+  var shoulderR = new THREE.Group();
+  shoulderR.position.set(0.56, 0.60, 0.14);
+  torsoGroup.add(shoulderR);
+  shoulderR.add(new THREE.Mesh(new THREE.SphereGeometry(0.14, 12, 10), matDarkCoat));
+  var upperArmR = new THREE.Mesh(new THREE.CapsuleGeometry(0.085, 0.28, 8, 12), matCoat);
+  upperArmR.position.set(0.11, -0.18, 0.08);
+  upperArmR.rotation.z = 0.35;
+  upperArmR.rotation.x = -0.22;
+  shoulderR.add(upperArmR);
+
+  var elbowR = new THREE.Group();
+  elbowR.position.set(0.22, -0.34, 0.08);
+  shoulderR.add(elbowR);
+  elbowR.add(new THREE.Mesh(new THREE.SphereGeometry(0.105, 12, 10), matDarkCoat));
+  var forearmR = new THREE.Mesh(new THREE.CapsuleGeometry(0.078, 0.26, 8, 12), matCoat);
+  forearmR.position.set(0.14, 0.06, 0.14);
+  forearmR.rotation.z = -0.78;
+  forearmR.rotation.x = 0.45;
+  elbowR.add(forearmR);
+
+  var handR = new THREE.Group();
+  handR.position.set(0.28, 0.14, 0.24);
+  elbowR.add(handR);
+  var handMeshR = new THREE.Mesh(new THREE.SphereGeometry(0.105, 12, 10), matWhite);
+  handMeshR.position.set(-0.02, -0.06, 0);
+  handR.add(handMeshR);
+
+  // 3D Martini Prop
+  var martiniGroup = new THREE.Group();
+  martiniGroup.position.set(0.02, 0.22, 0.02);
+  handR.add(martiniGroup);
+  var matGlass = new THREE.MeshStandardMaterial({
+    color: '#f0f9ff', emissive: '#38bdf8', emissiveIntensity: 0.14,
+    metalness: 0.22, roughness: 0.05, envMapIntensity: 2.5, transparent: true, opacity: 0.68, side: THREE.DoubleSide,
+  });
+  var matRimHighlight = new THREE.MeshBasicMaterial({ color: '#e0f2fe', transparent: true, opacity: 0.88 });
+  var matLiquid = new THREE.MeshStandardMaterial({
+    color: '#bef264', emissive: '#4ade80', emissiveIntensity: 0.28,
+    metalness: 0.12, roughness: 0.10, transparent: true, opacity: 0.85,
+  });
+  var matOlive = new THREE.MeshStandardMaterial({ color: '#65a30d', emissive: '#365314', emissiveIntensity: 0.22, roughness: 0.28, metalness: 0.08 });
+  var matPimento = new THREE.MeshStandardMaterial({ color: '#f43f5e', emissive: '#e11d48', emissiveIntensity: 0.35, roughness: 0.24 });
+
+  var mBase = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.19, 0.026, 18), matGlass);
+  mBase.position.y = -0.24;
+  martiniGroup.add(mBase);
+  var mStem = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.026, 0.31, 12), matGlass);
+  mStem.position.y = -0.08;
+  martiniGroup.add(mStem);
+  var mBowl = new THREE.Mesh(new THREE.ConeGeometry(0.31, 0.27, 22, 1, true), matGlass);
+  mBowl.rotation.x = Math.PI;
+  mBowl.position.y = 0.20;
+  martiniGroup.add(mBowl);
+  var mRim = new THREE.Mesh(new THREE.TorusGeometry(0.31, 0.012, 8, 22), matRimHighlight);
+  mRim.rotation.x = Math.PI / 2;
+  mRim.position.y = 0.335;
+  martiniGroup.add(mRim);
+  var liquidGroup = new THREE.Group();
+  liquidGroup.position.y = 0.18;
+  martiniGroup.add(liquidGroup);
+  var liquidCone = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.19, 18), matLiquid);
+  liquidCone.rotation.x = Math.PI;
+  liquidGroup.add(liquidCone);
+  var pickGroup = new THREE.Group();
+  pickGroup.position.set(0.04, 0.22, 0.02);
+  pickGroup.rotation.z = -0.44;
+  martiniGroup.add(pickGroup);
+  var pickStick = new THREE.Mesh(new THREE.CylinderGeometry(0.010, 0.008, 0.42, 8), matBrass);
+  pickStick.position.y = 0.06;
+  pickGroup.add(pickStick);
+  var pickBead = new THREE.Mesh(new THREE.SphereGeometry(0.032, 10, 8), matBrass);
+  pickBead.position.y = 0.27;
+  pickGroup.add(pickBead);
+  var olive = new THREE.Mesh(new THREE.SphereGeometry(0.074, 12, 10), matOlive);
+  olive.scale.set(0.90, 1.18, 0.90);
+  olive.position.y = -0.01;
+  pickGroup.add(olive);
+  var pimento = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.04, 10), matPimento);
+  pimento.rotation.z = Math.PI / 2;
+  pimento.position.set(0.056, -0.01, 0);
+  pickGroup.add(pimento);
+
+  var scale = 0.56;
+  root.scale.setScalar(scale);
+  root.position.y = 0.24 * scale;
+
+  function applyPose(p3) {
+    bodyRoot.position.set(p3.bodyX / scale, p3.bodyY / scale, 0);
+    bodyRoot.rotation.set(p3.bodyRx, p3.bodyRy, p3.bodyRz);
+
+    // Periodic bored martini sip when calm, or animated arm when gesturing
+    var cycle = ((p3.step || 0) % 8);
+    var autoSip = !p3.worried && cycle >= 5.2 && cycle <= 7.4
+      ? Math.sin(((cycle - 5.2) / 2.2) * Math.PI)
+      : 0;
+    var sip = Math.max(autoSip, p3.worried ? 0 : Math.max(0, ((p3.arm || 0) - 0.35) / 0.65));
+
+    torsoGroup.rotation.set(p3.headRx * 0.7 - sip * 0.12, p3.headRy * 0.75, p3.headRz * 0.7);
+    brainGroup.position.y = 0.34 + Math.sin((p3.step || 0) * Math.PI * 2) * 0.025;
+    brainGroup.rotation.y = Math.sin((p3.step || 0) * 1.4) * 0.08;
+    mustache.position.y = -0.25 + sip * 0.018;
+
+    byteLegL.hip.rotation.set(p3.legLRx, 0, p3.legLRz);
+    byteLegL.knee.rotation.x = Math.max(0, -p3.legLRx * 0.6);
+    byteLegR.hip.rotation.set(p3.legRRx, 0, p3.legRRz);
+    byteLegR.knee.rotation.x = Math.max(0, -p3.legRRx * 0.6);
+
+    shoulderL.rotation.set(p3.armLRx, 0, p3.armLRz * 0.65);
+
+    var swirl = (1 - sip) * Math.sin((p3.step || 0) * Math.PI * 2) * 0.08;
+    shoulderR.rotation.x = -0.10 - sip * 0.26;
+    shoulderR.rotation.z = 0.24 + sip * 0.26;
+    shoulderR.rotation.y = 0.14 + sip * 0.26;
+    elbowR.rotation.x = 0.02 - sip * 0.16;
+    elbowR.rotation.z = 0.22 + sip * 0.30;
+    elbowR.rotation.y = swirl;
+    var tipDrink = Math.max(0, (sip - 0.55) / 0.45);
+    handR.rotation.set(0.06 - tipDrink * 0.12, -0.15, -0.34 + swirl - sip * 0.46 + tipDrink * 0.48);
+    liquidGroup.rotation.z = -swirl * 0.6 - tipDrink * 0.32;
+
+    shadow.material.opacity = p3.shadowOp * 2.6;
+    var eyelidClose = p3.worried ? 0.18 : Math.min(0.84, 0.54 + sip * 0.18);
+    drawSpectacles(Math.max(-0.5, Math.min(0.5, p3.headRy)), eyelidClose, p3.worried);
+  }
+
+  return {
+    group: root,
+    head: domeGroup,
+    legL: byteLegL.hip,
+    legR: byteLegR.hip,
+    armL: shoulderL,
+    armR: shoulderR,
+    shadow: shadow,
+    flame: null,
+    sweatPos: [0.68, 0.42, 0.35],
+    sweatScale: 1.7,
+    applyPose: applyPose,
+  };
+}
+
+/**
+ * 3D PBR Turbo ('zoom'): contoured metallic silver-white rocket fuselage with glossy
+ * crimson nosecone, swept crimson aerodynamic delta fins, twin cyan racing stripes,
+ * riveted anodized cyan cockpit porthole with golden-yellow HUD eyes, silver racer arms
+ * with cyan fists, articulated jet-boot legs, and multi-layered plasma exhaust plume.
+ */
+function tbsCreateTurbo(THREE) {
+  var matHull = new THREE.MeshStandardMaterial({ color: '#f1f5f9', metalness: 0.45, roughness: 0.20, envMapIntensity: 1.4 });
+  var matCrimson = new THREE.MeshStandardMaterial({ color: '#f43f5e', emissive: '#9f1239', emissiveIntensity: 0.22, metalness: 0.35, roughness: 0.18, envMapIntensity: 1.4 });
+  var matCyanRing = new THREE.MeshStandardMaterial({ color: '#38bdf8', emissive: '#0284c7', emissiveIntensity: 0.65, metalness: 0.35, roughness: 0.2 });
+  var matDeepCyan = new THREE.MeshStandardMaterial({ color: '#0284c7', metalness: 0.4, roughness: 0.25 });
+  var matSteel = new THREE.MeshStandardMaterial({ color: '#475569', metalness: 0.82, roughness: 0.26 });
+  var matSilverArm = new THREE.MeshStandardMaterial({ color: '#cbd5e1', metalness: 0.78, roughness: 0.22 });
+  var matDarkNavy = new THREE.MeshStandardMaterial({ color: '#0b1530', metalness: 0.45, roughness: 0.4 });
+  var matFlameOuter = new THREE.MeshBasicMaterial({ color: '#fb7185', transparent: true, opacity: 0.85 });
+  var matFlameMid = new THREE.MeshBasicMaterial({ color: '#facc15', transparent: true, opacity: 0.92 });
+  var matFlameCore = new THREE.MeshBasicMaterial({ color: '#fef9c3' });
+
+  var pTc = tbsMakeTexCanvas(THREE, 128, 128);
+  var lastPortKey = '';
+  function drawPorthole(energy, accent, beatGlow, worried) {
+    if (!pTc.ctx) return;
+    var key = Math.round(energy * 5) + ':' + Math.round(accent * 5) + ':' + Math.round(beatGlow * 6) + ':' + (worried ? 1 : 0);
+    if (key === lastPortKey) return;
+    lastPortKey = key;
+    var ctx = pTc.ctx;
+    ctx.clearRect(0, 0, 128, 128);
+    var bg = ctx.createRadialGradient(57, 52, 5, 64, 64, 64);
+    bg.addColorStop(0, '#0c1938');
+    bg.addColorStop(0.65, '#070f24');
+    bg.addColorStop(1, '#02050d');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, 128, 128);
+
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.14)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(64, 64, 33, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(186, 230, 253, 0.42)';
+    ctx.lineWidth = 3.5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(64, 64, 48, Math.PI * 1.18, Math.PI * 1.82);
+    ctx.stroke();
+
+    ctx.save();
+    ctx.shadowColor = '#facc15';
+    ctx.shadowBlur = 7 + beatGlow * 9;
+    var browSlope = worried ? -5 : (4 + accent * 6 + energy * 2.5);
+    [-1, 1].forEach(function (side) {
+      var cx = 64 + side * 22, cy = 56;
+      ctx.fillStyle = '#facc15';
+      ctx.beginPath();
+      ctx.moveTo(cx + side * 15, cy - 13);
+      ctx.lineTo(cx - side * 12, cy - 13 + browSlope);
+      ctx.lineTo(cx - side * 11, cy + 9);
+      ctx.lineTo(cx + side * 14, cy + 7.5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(cx - side * 2.5, cy - 2.5, 3.8, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.strokeStyle = '#fde047';
+    ctx.lineWidth = 5.5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    if (worried) {
+      ctx.moveTo(44, 88);
+      ctx.quadraticCurveTo(64, 76, 84, 88);
+    } else {
+      ctx.moveTo(42, 84);
+      ctx.quadraticCurveTo(64, 94 + beatGlow * 5, 88, 81);
+    }
+    ctx.stroke();
+    ctx.restore();
+    pTc.texture.needsUpdate = true;
+  }
+  drawPorthole(0.5, 0, 0, false);
+
+  var matPortholeGlass = new THREE.MeshStandardMaterial({
+    map: pTc.texture,
+    emissive: '#ffffff',
+    emissiveMap: pTc.texture,
+    emissiveIntensity: 0.92,
+    roughness: 0.08,
+    metalness: 0.22,
+  });
+
+  var root = new THREE.Group();
+  var shadow = tbsContactShadowMesh(THREE, 0.92, 'rgba(251, 113, 133, 0.20)');
+  shadow.position.set(0, -0.24, 0.02);
+  root.add(shadow);
+
+  var bodyRoot = new THREE.Group();
+  root.add(bodyRoot);
+
+  var pelvis = new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 0.84, 0.22, 0.52, 0.10, 0.03), matSteel);
+  pelvis.position.set(0, 0.80, 0);
+  bodyRoot.add(pelvis);
+
+  function buildTurboLeg(side) {
+    var hip = new THREE.Group();
+    hip.position.set(side * 0.27, 0.74, 0);
+    var thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.095, 0.30, 8, 12), matSilverArm);
+    thigh.position.set(side * 0.03, -0.18, 0);
+    thigh.rotation.z = -side * 0.06;
+    hip.add(thigh);
+    var knee = new THREE.Group();
+    knee.position.set(side * 0.05, -0.38, 0.02);
+    hip.add(knee);
+    knee.add(new THREE.Mesh(new THREE.SphereGeometry(0.115, 12, 10), matCrimson));
+    var shin = new THREE.Mesh(new THREE.CapsuleGeometry(0.088, 0.28, 8, 12), matSilverArm);
+    shin.position.set(-side * 0.02, -0.20, -0.02);
+    knee.add(shin);
+    var ankle = new THREE.Group();
+    ankle.position.set(-side * 0.02, -0.42, 0.04);
+    knee.add(ankle);
+    ankle.add(new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 0.32, 0.20, 0.48, 0.08, 0.03), matCrimson));
+    var bootStripe = new THREE.Mesh(tbsExtrudedRoundedBox(THREE, 0.34, 0.05, 0.50, 0.03, 0.012), matCyanRing);
+    bootStripe.position.set(0, -0.06, 0);
+    ankle.add(bootStripe);
+    var bootFin = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.03, 0.24), matCyanRing);
+    bootFin.position.set(side * 0.19, 0.02, -0.04);
+    bootFin.rotation.z = -side * 0.35;
+    ankle.add(bootFin);
+    bodyRoot.add(hip);
+    return { hip: hip, knee: knee, ankle: ankle };
+  }
+  var legL = buildTurboLeg(-1);
+  var legR = buildTurboLeg(1);
+
+  var torsoGroup = new THREE.Group();
+  torsoGroup.position.set(0, 0.86, 0);
+  bodyRoot.add(torsoGroup);
+
+  var fusePts = [];
+  for (var i = 0; i <= 24; i++) {
+    var t = i / 24, y = t * 1.86, r;
+    if (t < 0.70) r = 0.44 + Math.sin((t / 0.70) * Math.PI * 0.82) * 0.16;
+    else r = 0.51 * Math.pow(1 - (t - 0.70) / 0.30, 0.74);
+    fusePts.push(new THREE.Vector2(Math.max(0.005, r), y));
+  }
+  torsoGroup.add(new THREE.Mesh(new THREE.LatheGeometry(fusePts, 24), matHull));
+
+  var nosePts = [];
+  for (var j = 0; j <= 14; j++) {
+    var u = j / 14;
+    nosePts.push(new THREE.Vector2(Math.max(0.004, 0.515 * Math.pow(1 - u, 0.74)), 1.30 + u * 0.565));
+  }
+  torsoGroup.add(new THREE.Mesh(new THREE.LatheGeometry(nosePts, 24), matCrimson));
+
+  var stripe1 = new THREE.Mesh(new THREE.TorusGeometry(0.545, 0.032, 10, 24), matCyanRing);
+  stripe1.rotation.x = Math.PI / 2;
+  stripe1.position.y = 0.46;
+  torsoGroup.add(stripe1);
+  var stripe2 = new THREE.Mesh(new THREE.TorusGeometry(0.515, 0.026, 10, 24), matDeepCyan);
+  stripe2.rotation.x = Math.PI / 2;
+  stripe2.position.y = 0.30;
+  torsoGroup.add(stripe2);
+
+  var nozzleCollar = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.48, 0.16, 20), matSteel);
+  nozzleCollar.position.y = 0.06;
+  torsoGroup.add(nozzleCollar);
+
+  function createDeltaFinGeo(side) {
+    var s = new THREE.Shape();
+    s.moveTo(0, 0.52);
+    s.lineTo(side * 0.56, -0.24);
+    s.lineTo(side * 0.08, -0.02);
+    s.closePath();
+    var geo = new THREE.ExtrudeGeometry(s, {
+      depth: 0.08, bevelEnabled: true, bevelSegments: 2, steps: 1, bevelSize: 0.02, bevelThickness: 0.02,
+    });
+    geo.center();
+    return geo;
+  }
+  var finL = new THREE.Mesh(createDeltaFinGeo(-1), matCrimson);
+  finL.position.set(-0.66, 0.24, 0);
+  torsoGroup.add(finL);
+  var finR = new THREE.Mesh(createDeltaFinGeo(1), matCrimson);
+  finR.position.set(0.66, 0.24, 0);
+  torsoGroup.add(finR);
+  var finBack = new THREE.Mesh(createDeltaFinGeo(1), matCrimson);
+  finBack.rotation.y = Math.PI / 2;
+  finBack.position.set(0, 0.24, -0.66);
+  torsoGroup.add(finBack);
+
+  var portholeGroup = new THREE.Group();
+  portholeGroup.position.set(0, 0.94, 0.56);
+  torsoGroup.add(portholeGroup);
+  portholeGroup.add(new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.055, 12, 24), matCyanRing));
+  portholeGroup.add(new THREE.Mesh(new THREE.TorusGeometry(0.38, 0.02, 10, 24), matDarkNavy));
+  var portholeGlass = new THREE.Mesh(new THREE.CircleGeometry(0.325, 24), matPortholeGlass);
+  portholeGlass.position.z = 0.048;
+  portholeGroup.add(portholeGlass);
+
+  var backHatch = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.08, 18), matSteel);
+  backHatch.rotation.x = Math.PI / 2;
+  backHatch.position.set(0, 0.92, -0.54);
+  torsoGroup.add(backHatch);
+  var backCore = new THREE.Mesh(new THREE.CircleGeometry(0.18, 18), matCyanRing);
+  backCore.rotation.y = Math.PI;
+  backCore.position.set(0, 0.92, -0.585);
+  torsoGroup.add(backCore);
+
+  function buildTurboArm(side) {
+    var shoulder = new THREE.Group();
+    shoulder.position.set(side * 0.56, 0.78, 0.04);
+    shoulder.add(new THREE.Mesh(new THREE.SphereGeometry(0.14, 12, 10), matSteel));
+    var upperArm = new THREE.Mesh(new THREE.CapsuleGeometry(0.075, 0.30, 8, 12), matSilverArm);
+    upperArm.position.set(side * 0.14, -0.18, 0.02);
+    upperArm.rotation.z = side * 0.32;
+    shoulder.add(upperArm);
+    var elbow = new THREE.Group();
+    elbow.position.set(side * 0.25, -0.36, 0.04);
+    shoulder.add(elbow);
+    elbow.add(new THREE.Mesh(new THREE.SphereGeometry(0.105, 12, 10), matSilverArm));
+    var forearm = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.25, 8, 12), matSilverArm);
+    forearm.position.set(-side * 0.04, -0.16, 0.15);
+    forearm.rotation.x = -0.65;
+    elbow.add(forearm);
+    var fist = new THREE.Mesh(new THREE.SphereGeometry(0.115, 14, 12), matCyanRing);
+    fist.position.set(-side * 0.06, -0.32, 0.30);
+    elbow.add(fist);
+    torsoGroup.add(shoulder);
+    return { shoulder: shoulder, elbow: elbow };
+  }
+  var armL = buildTurboArm(-1);
+  var armR = buildTurboArm(1);
+
+  var flameGroup = new THREE.Group();
+  flameGroup.position.set(0, -0.02, -0.14);
+  flameGroup.rotation.x = 0.24;
+  torsoGroup.add(flameGroup);
+  var coneOuter = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.56, 16), matFlameOuter);
+  coneOuter.rotation.x = Math.PI;
+  coneOuter.position.y = -0.26;
+  flameGroup.add(coneOuter);
+  var coneMid = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.42, 14), matFlameMid);
+  coneMid.rotation.x = Math.PI;
+  coneMid.position.y = -0.20;
+  flameGroup.add(coneMid);
+  var coneCore = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.26, 12), matFlameCore);
+  coneCore.rotation.x = Math.PI;
+  coneCore.position.y = -0.12;
+  flameGroup.add(coneCore);
+  var flameHalo = tbsGlowSprite(THREE, 'rgba(254, 240, 138, 0.95)', 'rgba(251, 113, 133, 0.52)');
+  flameHalo.position.y = -0.20;
+  flameHalo.scale.set(0.85, 0.85, 1);
+  flameGroup.add(flameHalo);
+
+  var scale = 0.56;
+  root.scale.setScalar(scale);
+  root.position.y = 0.24 * scale;
+
+  function applyPose(p3) {
+    bodyRoot.position.set(p3.bodyX / scale, p3.bodyY / scale, 0);
+    bodyRoot.rotation.set(p3.bodyRx, p3.bodyRy, p3.bodyRz);
+
+    portholeGroup.rotation.set(p3.headRx * 0.5, p3.headRy * 0.5, p3.headRz * 0.5);
+    legL.hip.rotation.set(p3.legLRx, 0, p3.legLRz);
+    legR.hip.rotation.set(p3.legRRx, 0, p3.legRRz);
+
+    armL.shoulder.rotation.set(p3.armLRx - 0.15, 0, p3.armLRz);
+    armR.shoulder.rotation.set(p3.armRRx - 0.15, 0, p3.armRRz);
+
+    var w = 0.85 + 0.25 * Math.min(1.5, p3.flameScale - 0.5);
+    flameGroup.scale.set(w, p3.flameScale, w);
+    flameHalo.scale.setScalar(0.85 + (p3.flameScale - 0.5) * 0.65);
+
+    shadow.material.opacity = p3.shadowOp * 2.6;
+    drawPorthole(p3.energy || 0.6, p3.arm || 0, Math.max(0, p3.flameScale - 0.7), p3.worried);
+  }
+
+  return {
+    group: root,
+    head: portholeGroup,
+    legL: legL.hip,
+    legR: legR.hip,
+    armL: armL.shoulder,
+    armR: armR.shoulder,
+    shadow: shadow,
+    flame: flameGroup,
+    sweatPos: [0.48, 0.28, 0.05],
+    sweatScale: 1.7,
+    applyPose: applyPose,
+  };
+}
+
+function tbsBuildCastRobot3d(THREE, kind) {
+  if (kind === 'glitch') return tbsCreateGlitch(THREE);
+  if (kind === 'dizzy') return tbsCreateProfByte(THREE);
+  if (kind === 'zoom') return tbsCreateTurbo(THREE);
+  return tbsCreateNova7(THREE);
+}
+
+/**
+ * Single shared offscreen Three.js WebGL stage that renders each AI robot's 3D PBR character
+ * model (Nova-7, Glitch, Prof. Byte, Turbo) onto its lightweight 2D canvas inside .tbs-actor.
+ * Uses one WebGL context total (disposed as soon as the show stops) and a small pixel buffer
+ * so weak Android TV chips stay smooth.
  */
 function createTopbarBotStage3d(THREE, castDefs, opts) {
   opts = opts || {};
   var lowPower = !!opts.lowPower;
-  var avatarRig = opts.avatarRig || (typeof SH !== 'undefined' && SH.avatarRig);
-  if (!THREE || typeof avatarRig !== 'function') return null;
+  if (!THREE) return null;
 
   var rw = lowPower ? 160 : 240;
   var rh = lowPower ? 192 : 288;
@@ -799,57 +2499,46 @@ function createTopbarBotStage3d(THREE, castDefs, opts) {
   if (renderer.setClearColor) renderer.setClearColor(0x000000, 0);
   if (renderer.setPixelRatio) renderer.setPixelRatio(1);
   if (renderer.setSize) renderer.setSize(rw, rh, false);
+  if ('outputColorSpace' in renderer && THREE.SRGBColorSpace) renderer.outputColorSpace = THREE.SRGBColorSpace;
+  if ('toneMapping' in renderer && THREE.ACESFilmicToneMapping) {
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.16;
+  }
 
   var scene = new THREE.Scene();
+  var envTex = !opts.rendererFactory ? tbsStudioEnvironment(THREE, renderer) : null;
+  if (envTex) scene.environment = envTex;
+
   var camera = new THREE.PerspectiveCamera(34, 200 / 240, 0.1, 20);
-  camera.position.set(0, 1.18, 3.6);
-  camera.lookAt(0, 0.99, 0);
+  camera.position.set(0, 1.15, 3.65);
+  camera.lookAt(0, 0.95, 0);
 
-  scene.add(new THREE.HemisphereLight(0xf8fafc, 0x334155, 1.45));
-  var keyLight = new THREE.DirectionalLight(0xffffff, 1.45);
-  keyLight.position.set(-2.5, 4.5, 4.0);
+  scene.add(new THREE.HemisphereLight(0xe0f2fe, 0x091226, 1.25));
+  var keyLight = new THREE.DirectionalLight(0xfffbeb, 2.15);
+  keyLight.position.set(-2.6, 5.2, 5.0);
   scene.add(keyLight);
-  var rimLight = new THREE.DirectionalLight(0x7dd3fc, 1.05);
-  rimLight.position.set(3.0, 2.5, -2.5);
-  scene.add(rimLight);
+  var rimCyan = new THREE.DirectionalLight(0x38bdf8, 1.75);
+  rimCyan.position.set(-3.6, 3.4, 2.4);
+  scene.add(rimCyan);
+  var rimYellow = new THREE.DirectionalLight(0xfacc15, 1.55);
+  rimYellow.position.set(3.6, 3.8, 2.8);
+  scene.add(rimYellow);
+  var rimViolet = new THREE.DirectionalLight(0xa78bfa, 1.25);
+  rimViolet.position.set(3.0, 1.5, -2.5);
+  scene.add(rimViolet);
 
-  var shadowGeo = new THREE.CircleGeometry(0.42, 16);
   var sweatDropGeo = new THREE.SphereGeometry(0.055, 8, 8);
   var sweatTipGeo = new THREE.ConeGeometry(0.052, 0.11, 8);
   var sweatMat = new THREE.MeshBasicMaterial({ color: 0x7dd3fc });
 
-  function wrapPivot(parent, child, px, py, pz) {
-    if (!child || child.parent !== parent) return child;
-    var g = new THREE.Group();
-    g.position.set(px, py, pz);
-    parent.add(g);
-    child.position.set(child.position.x - px, child.position.y - py, child.position.z - pz);
-    g.add(child);
-    return g;
-  }
-
   var actors = (castDefs || []).map(function (def) {
-    var rig = avatarRig(THREE, def.avatar);
-    var flame = null;
-    // Gentle self-illumination keeps dark hulls readable on the navy topbar without losing 3D shading.
-    rig.group.traverse(function (o) {
-      if (o.isMesh && o.material && o.material.emissive && o.material.color) {
-        o.material.emissive.copy(o.material.color);
-        o.material.emissiveIntensity = 0.25;
-      }
-      if (def.kind === 'zoom' && o.isMesh && o.geometry && o.geometry.type === 'ConeGeometry' && o.position.z < -0.2) {
-        flame = o;
-      }
-    });
-
-    var shoulderY = rig.shoulderY || 0.98;
-    var legL = wrapPivot(rig.group, rig.legL, -0.13, 0.46, 0);
-    var legR = wrapPivot(rig.group, rig.legR, 0.13, 0.46, 0);
-    var armL = wrapPivot(rig.group, rig.armL, -0.34, shoulderY, 0);
-    var armR = wrapPivot(rig.group, rig.armR, 0.34, shoulderY, 0);
+    var kind = def.kind || 'boot';
+    var rig = tbsBuildCastRobot3d(THREE, kind);
 
     var sweat = new THREE.Group();
-    sweat.position.set(def.kind === 'zoom' ? 0.28 : 0.36, def.kind === 'zoom' ? 0.08 : 0.22, 0.14);
+    var sp = rig.sweatPos || [0.36, 0.22, 0.14];
+    sweat.position.set(sp[0], sp[1], sp[2]);
+    sweat.scale.setScalar(rig.sweatScale || 1.8);
     sweat.add(new THREE.Mesh(sweatDropGeo, sweatMat));
     var tip = new THREE.Mesh(sweatTipGeo, sweatMat);
     tip.position.y = 0.07;
@@ -857,30 +2546,24 @@ function createTopbarBotStage3d(THREE, castDefs, opts) {
     sweat.visible = false;
     if (rig.head) rig.head.add(sweat);
 
-    var shadowMat = new THREE.MeshBasicMaterial({ color: 0x0b1530, transparent: true, opacity: 0.28, depthWrite: false });
-    var shadow = new THREE.Mesh(shadowGeo, shadowMat);
-    shadow.rotation.x = -Math.PI / 2;
-    shadow.position.y = 0.01;
-
     var root = new THREE.Group();
-    root.add(shadow);
     root.add(rig.group);
     root.visible = false;
     scene.add(root);
 
     return {
-      kind: def.kind || 'boot',
+      kind: kind,
       root: root,
       group: rig.group,
       head: rig.head,
-      legL: legL,
-      legR: legR,
-      armL: armL,
-      armR: armR,
-      flame: flame,
-      flameBaseScale: flame ? [flame.scale.x, flame.scale.y, flame.scale.z] : null,
-      shadow: shadow,
+      legL: rig.legL,
+      legR: rig.legR,
+      armL: rig.armL,
+      armR: rig.armR,
+      flame: rig.flame,
+      shadow: rig.shadow,
       sweat: sweat,
+      applyPose: rig.applyPose,
     };
   });
 
@@ -892,18 +2575,7 @@ function createTopbarBotStage3d(THREE, castDefs, opts) {
     var a = actors[idx];
     if (!a) return;
     var p3 = tbsBot3dPose(a.kind, pose, scratch);
-    a.group.position.set(p3.bodyX, p3.bodyY, 0);
-    a.group.rotation.set(p3.bodyRx, p3.bodyRy, p3.bodyRz);
-    if (a.head) a.head.rotation.set(p3.headRx, p3.headRy, p3.headRz);
-    if (a.legL) a.legL.rotation.set(p3.legLRx, 0, p3.legLRz);
-    if (a.legR) a.legR.rotation.set(p3.legRRx, 0, p3.legRRz);
-    if (a.armL) a.armL.rotation.set(p3.armLRx, 0, p3.armLRz);
-    if (a.armR) a.armR.rotation.set(p3.armRRx, 0, p3.armRRz);
-    if (a.flame && a.flameBaseScale) {
-      var w = 0.85 + 0.25 * Math.min(1.5, p3.flameScale - 0.5);
-      a.flame.scale.set(a.flameBaseScale[0] * w, a.flameBaseScale[1] * p3.flameScale, a.flameBaseScale[2] * w);
-    }
-    a.shadow.material.opacity = p3.shadowOp;
+    a.applyPose(p3);
     a.sweat.visible = p3.worried;
 
     a.root.visible = true;
@@ -929,8 +2601,10 @@ function createTopbarBotStage3d(THREE, castDefs, opts) {
     geos.forEach(function (g) { if (g.dispose) g.dispose(); });
     mats.forEach(function (m) {
       if (m.map && m.map.dispose) m.map.dispose();
+      if (m.emissiveMap && m.emissiveMap.dispose) m.emissiveMap.dispose();
       if (m.dispose) m.dispose();
     });
+    if (envTex && envTex.dispose) envTex.dispose();
     if (renderer.dispose) renderer.dispose();
     if (renderer.forceContextLoss) renderer.forceContextLoss();
   }
@@ -1297,9 +2971,9 @@ function createTopbarShow(opts) {
       '<span class="tbs-chip-dots"><i></i><i></i><i></i><i></i></span></div>' +
     '<div class="tbs-singer"><div class="tbs-singer-glow"></div>' + TBS_SINGER_SVG + '</div>' +
     '<div class="tbs-flash"></div>';
-  // The AI cast: rendered with the 3D SH.avatarRig models (avatar-3d.js) via one shared
-  // offscreen WebGL stage created while the show runs and disposed as soon as it stops,
-  // with automatic fallback to the 2D SVG rigs (ai-robots.js) if Three.js/WebGL is unavailable.
+  // The AI cast: rendered with the 3D PBR robot models (Nova-7, Glitch, Prof. Byte, Turbo)
+  // via one shared offscreen WebGL stage created while the show runs and disposed as soon
+  // as it stops, with automatic fallback to the 2D SVG rigs (ai-robots.js) if WebGL fails.
   // Each robot dances in the bar, behind the singer, and moves to the cast layer over the page
   // (above the topbar, which would clip it) while it is away from its spot, as in the Board Crash.
   var TBS_ROLE = { boot: 'nova', glitch: 'glitch', dizzy: 'byte', zoom: 'turbo' };
@@ -1310,7 +2984,7 @@ function createTopbarShow(opts) {
   var bots3dLoading = false;
   var bots3dFailed = false;
   var bots3dGen = 0;
-  var canUse3d = typeof SH !== 'undefined' && typeof SH.loadThree === 'function' && typeof SH.avatarRig === 'function';
+  var canUse3d = typeof SH !== 'undefined' && typeof SH.loadThree === 'function';
   var cast = typeof SH_AI !== 'undefined' && SH_AI ? SH_AI.slice(0, TBS_BOT_SPOTS.length) : [];
   cast.forEach(function (persona, i) {
     var kind = persona.entrance || 'boot';
@@ -1826,6 +3500,7 @@ function createTopbarShow(opts) {
       if (!bp.show) continue;
       var pose = {
         step: bp.step, wheel: bp.wheel, boost: bp.boost, mood: bp.mood, arm: bp.arm, look: bp.look, jitter: bp.jitter,
+        hit: hit, energy: loc.energy, t: t,
       };
       var emote = bp.emote, by = bp.y, brot = bp.rot, bflip = bp.flip, bsy = bp.sy, bx = bounds.left + w * TBS_BOT_SPOTS[bi] + bp.x;
       if (re) {
@@ -2168,5 +3843,6 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     tbsBeatIndex: tbsBeatIndex, tbsLocate: tbsLocate, tbsPose: tbsPose, tbsShake: tbsShake, tbsDancerPose: tbsDancerPose, tbsBotPose: tbsBotPose, tbsCrashState: tbsCrashState, tbsSongLines: tbsSongLines, TBS_SONG_LINES: TBS_SONG_LINES, tbsCrashCard: tbsCrashCard, TBS_CRASH_AT: TBS_CRASH_AT, TBS_CRASH_LINES: TBS_CRASH_LINES, tbsRand: tbsRand, tbsKnee: tbsKnee,
     tbsGovernor: tbsGovernor, tbsGovern: tbsGovern, tbsHair: tbsHair, tbsHairStep: tbsHairStep, tbsPool: tbsPool, tbsPoolTake: tbsPoolTake, tbsPoolKill: tbsPoolKill, createTopbarShow: createTopbarShow, TBS_SHOWS: TBS_SHOWS, tbsBotMove: tbsBotMove, tbsBotGagOwner: tbsBotGagOwner, TBS_BOT_SPOTS: TBS_BOT_SPOTS, tbsBot3dPose: tbsBot3dPose, createTopbarBotStage3d: createTopbarBotStage3d,
+    tbsCreateNova7: tbsCreateNova7, tbsCreateGlitch: tbsCreateGlitch, tbsCreateProfByte: tbsCreateProfByte, tbsCreateTurbo: tbsCreateTurbo, tbsBuildCastRobot3d: tbsBuildCastRobot3d,
   };
 }
