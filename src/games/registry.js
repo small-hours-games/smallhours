@@ -4,11 +4,12 @@
 // and plain manifest objects, category-prefixed folders (e.g. `card-palace/`),
 // and backward-compatible ID `aliases` (e.g. `aliases: ['shithead']`).
 
+import { existsSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { join, resolve } from 'node:path';
 import { loadCustomGames, buildCustomGameDefinition } from './custom-store.js';
-import { isGameVisibleInLobby, isGameDefaultHidden } from './visibility.js';
+import { isGameVisibleInLobby, isGameDefaultHidden, getVisibilityOverride } from './visibility.js';
 import { DEFAULT_GAMES_DIR, resolveGamesDirs } from './paths.js';
 import { platformSdk } from './sdk.js';
 
@@ -105,12 +106,14 @@ export async function loadGames(dir = resolveGamesDirs(), { sdk = platformSdk } 
           ? [...new Set(rawGame.aliases.map(a => String(a || '').trim()).filter(a => a && a !== rawGame.id))]
           : [];
         const category = rawGame.category || inferCategoryFromFolder(entry.name);
+        const hasClientFiles = existsSync(join(sourceDir, 'client', 'tv.js')) || existsSync(join(sourceDir, 'client', 'phone.js'));
         const game = {
           ...rawGame,
           aliases,
           category,
           folder: entry.name,
           sourceDir,
+          hasClientFiles,
         };
         games.set(game.id, game);
         for (const alias of aliases) {
@@ -234,7 +237,7 @@ export function publicGames(games = listGames()) {
     icon: g.icon,
     min: g.min,
     max: g.max,
-    hasUi: !isGameDefaultHidden(g) || Boolean(g.hasUi),
+    hasUi: g.hasUi !== undefined ? Boolean(g.hasUi) : (!isGameDefaultHidden(g) || Boolean(g.hasClientFiles) || getVisibilityOverride(g) === true),
     blurb: g.blurb,
     ...(g.soloBlurb ? { soloBlurb: g.soloBlurb } : {}),
     ...(g.ai ? { aiMax: g.ai.max } : {}),

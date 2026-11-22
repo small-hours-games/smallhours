@@ -10,6 +10,7 @@ export default function defineGame(sdk) {
     hidden: true, // no screens yet
     label: 'Uno',
     icon: '🎴',
+    theme: { color: '#f87171' },
     min: 2,
     max: 8,
   };

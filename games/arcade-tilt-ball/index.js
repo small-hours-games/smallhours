@@ -9,6 +9,7 @@ export default function defineGame() {
     order: 8,
     label: 'Tilt-Ball Arena',
     icon: '🔮',
+    theme: { color: '#c084fc' },
     min: 2,
     max: 8,
     blurb: '2–8 players • Tilt your phone to knock rivals off the shrinking arena!',

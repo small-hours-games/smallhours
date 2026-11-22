@@ -9,6 +9,7 @@ export default function defineGame() {
     order: 10,
     label: 'After Hours Runner',
     icon: '⚡',
+    theme: { color: '#f472b6' },
     min: 1,
     max: 4,
     blurb: '1–4 players • Race the synthwave cosmos, dodge barriers & collect H-O-U-R-S!',

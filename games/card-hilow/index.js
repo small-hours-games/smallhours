@@ -10,6 +10,7 @@ export default function defineGame(sdk) {
     hidden: true, // no screens yet
     label: 'Högt/Lågt',
     icon: '🃏',
+    theme: { color: '#60a5fa' },
     min: 2,
     max: 8,
     privateKeys: ['isActive'],

@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { publicGames } from '../../src/games/registry.js';
+import { publicGames, listGames } from '../../src/games/registry.js';
+import { resetVisibilityCacheForTest } from '../../src/games/visibility.js';
 const read = file => readFileSync(new URL('../../public/' + file, import.meta.url), 'utf8');
 function loadCatalog(context) {
   context.SH_GAMES = publicGames();
@@ -156,5 +157,41 @@ describe('Light lobby uses the multiplayer state', () => {
     context.renderPlayers();
     expect(elements.playerGrid.innerHTML).toContain('<span class="lobby-avatar-glyph">🦁</span>');
     expect(elements.playerGrid.innerHTML).toContain('Alice');
+  });
+
+  it('gives every built-in game (including arcade and admin-activated games) a coloured panel in light-lobby.css and shows activated games on the TV', () => {
+    const css = read('css/light-lobby.css');
+    for (const game of listGames().filter(g => !g.isCustom)) {
+      expect(css).toContain(`.lobby-game-option[data-game="${game.id}"]`);
+      expect(game.theme?.color).toMatch(/^#[0-9a-f]{6}$/i);
+      for (const alias of game.aliases || []) {
+        expect(css).toContain(`.lobby-game-option[data-game="${alias}"]`);
+      }
+    }
+
+    // When an admin activates a dev/hidden game (e.g. sensor-lab), it gets hasUi: true and appears in TV hostVotes
+    resetVisibilityCacheForTest({ 'sensor-lab': true });
+    try {
+      const visible = publicGames();
+      const sensorLab = visible.find(g => g.type === 'sensor-lab');
+      expect(sensorLab).toBeDefined();
+      expect(sensorLab.hasUi).toBe(true);
+
+      const elements = {};
+      const document = {
+        getElementById: id => (elements[id] ||= { style: {}, children: [], innerHTML: '', textContent: '' }),
+      };
+      const context = { state: { lobby: { gameSuggestions: {} } }, document, escapeHtml, SH_GAMES: visible };
+      runInNewContext(read('js/games.js'), context);
+      const source = read('host.html');
+      runInNewContext(source.slice(source.indexOf('    function renderHostVotes('), source.indexOf('    function placePartyChat(')), context);
+      context.renderHostVotes();
+      expect(elements.hostVotes.innerHTML).toContain('data-game="sensor-lab"');
+      expect(elements.hostVotes.innerHTML).toContain('data-game="tilt-ball"');
+      expect(elements.hostVotes.innerHTML).toContain('data-game="tennis"');
+      expect(elements.hostVotes.innerHTML).toContain('data-game="runner"');
+    } finally {
+      resetVisibilityCacheForTest({});
+    }
   });
 });

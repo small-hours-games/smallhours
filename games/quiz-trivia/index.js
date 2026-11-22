@@ -13,7 +13,7 @@ export default function defineGame(sdk) {
     label: 'Quiz',
     title: 'Quiz Time',
     icon: '🎯',
-    theme: { color: '#fb7185' },
+    theme: { color: '#38bdf8' },
     min: 1,
     max: 20,
     blurb: 'Trivia challenge • Pick a topic & race the clock',

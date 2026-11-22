@@ -9,6 +9,7 @@ export default function defineGame() {
     order: 9,
     label: 'Small Hours Tennis',
     icon: '🎾',
+    theme: { color: '#a3e635' },
     min: 2,
     max: 2,
     blurb: '1v1 • Swing your phone like a racket to rally and smash!',

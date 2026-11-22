@@ -12,7 +12,7 @@ export default function defineGame(sdk) {
     order: 4,
     label: 'Gin Rummy',
     icon: '♠️',
-    theme: { color: '#38bdf8' },
+    theme: { color: '#fb7185' },
     min: 2,
     max: 2,
     blurb: '2 players • Build sets & runs, knock low!',
