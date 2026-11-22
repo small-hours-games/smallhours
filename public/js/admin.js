@@ -221,4 +221,373 @@ curl -X POST ${location.origin}/api/v1/cards/deck \\
   -H "Authorization: Bearer sh_live_YOUR_KEY" \\
   -H "Content-Type: application/json" -d '{"decks":1,"aceHigh":true}'`;
 
-Promise.all([loadMe(), loadKeys(), loadGames()]).catch(() => {});
+// --- Lobby Music management, ordering, preview, and chunked uploads ---
+let lobbyMusicTracks = [];
+let lastConfirmedLobbyTracks = null;
+let lobbyMusicSaveSeq = 0;
+let previewAudio = null;
+let previewTrackId = null;
+let draggedTrackId = null;
+
+function formatBytes(bytes) {
+  const n = Number(bytes || 0);
+  if (n >= 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + ' MB';
+  if (n >= 1024) return Math.round(n / 1024) + ' KB';
+  return n + ' B';
+}
+
+function setMusicStatus(message, tone = 'muted') {
+  const el = document.getElementById('lobbyMusicStatus');
+  if (!el) return;
+  el.textContent = message;
+  el.className =
+    tone === 'error'
+      ? 'text-xs text-rose-400'
+      : tone === 'ok'
+        ? 'text-xs text-emerald-400'
+        : 'text-xs text-slate-400';
+}
+
+function setUploadStatus(message, tone = 'muted') {
+  const el = document.getElementById('lobbyMusicUploadStatus');
+  if (!el) return;
+  el.textContent = message;
+  el.className =
+    tone === 'error'
+      ? 'w-full text-xs text-rose-400'
+      : tone === 'warn'
+        ? 'w-full text-xs text-amber-300'
+        : tone === 'ok'
+          ? 'w-full text-xs text-emerald-400'
+          : 'w-full text-xs text-slate-400';
+}
+
+function stopLobbyPreview() {
+  if (previewAudio) {
+    try { previewAudio.pause(); } catch {}
+  }
+  previewTrackId = null;
+}
+
+function renderLobbyMusic() {
+  const list = document.getElementById('lobbyMusicList');
+  if (!list) return;
+  if (!lobbyMusicTracks.length) {
+    list.innerHTML = '<div class="text-sm text-slate-500 py-3">No lobby tracks yet. Upload an audio file below.</div>';
+    return;
+  }
+
+  let enabledRank = 0;
+  list.innerHTML = lobbyMusicTracks.map((t, idx) => {
+    if (t.enabled) enabledRank += 1;
+    const isFirst = t.enabled && enabledRank === 1;
+    const isPreviewing = previewTrackId === t.id && previewAudio && !previewAudio.paused;
+    const rankLabel = t.enabled ? `#${enabledRank}` : '—';
+    const badges = [
+      t.liveShow ? '<span title="Triggers the live topbar singer & robot show" class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-200 border border-amber-400/40">Live Show</span>' : '',
+      isFirst ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-200 border border-emerald-400/40">First</span>' : '',
+      t.source === 'upload' ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-500/20 text-sky-200 border border-sky-400/40">Uploaded</span>' : '',
+      t.xingWarning ? '<span title="MP3 lacks a Xing header — browser end-of-track fade may trigger early" class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-900/60 text-amber-200 border border-amber-500/40">No Xing</span>' : '',
+    ].filter(Boolean).join(' ');
+
+    return `
+      <div draggable="true" data-music-row-id="${esc(t.id)}"
+        class="rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 border transition ${t.enabled ? 'bg-slate-800/80 border-slate-700' : 'bg-slate-950/60 border-slate-800 opacity-60'}">
+        <div class="flex items-center gap-3 min-w-0 flex-1">
+          <span class="cursor-grab text-slate-500 hover:text-slate-300 select-none text-sm" title="Drag to reorder" aria-hidden="true">⋮⋮</span>
+          <span class="w-7 text-center font-mono text-xs font-bold ${isFirst ? 'text-emerald-300' : 'text-slate-400'}">${rankLabel}</span>
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center gap-1.5">
+              <span class="text-sm font-semibold truncate ${t.enabled ? 'text-white' : 'text-slate-400'}">${esc(t.title || t.filename)}</span>
+              ${badges}
+            </div>
+            <div class="text-[11px] text-slate-400 truncate">${esc(t.filename)} · ${esc(formatBytes(t.sizeBytes))} · ${t.source === 'upload' ? 'Uploaded' : 'Built-in'}</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-1.5 shrink-0">
+          <button type="button" data-music-preview="${esc(t.id)}" title="${isPreviewing ? 'Stop preview' : 'Preview track'}"
+            class="px-2.5 py-1 rounded-lg text-xs font-semibold ${isPreviewing ? 'bg-sky-600 text-white' : 'bg-slate-900 hover:bg-slate-700 text-slate-200'}">${isPreviewing ? '■' : '▶'}</button>
+          <button type="button" data-music-up="${esc(t.id)}" ${idx === 0 ? 'disabled' : ''} title="Move up"
+            class="px-2 py-1 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-700 text-slate-200 disabled:opacity-35">↑</button>
+          <button type="button" data-music-down="${esc(t.id)}" ${idx === lobbyMusicTracks.length - 1 ? 'disabled' : ''} title="Move down"
+            class="px-2 py-1 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-700 text-slate-200 disabled:opacity-35">↓</button>
+          <button type="button" data-music-toggle="${esc(t.id)}"
+            class="px-2.5 py-1 rounded-lg text-xs font-semibold ${t.enabled ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-400'}">${t.enabled ? 'On' : 'Off'}</button>
+          ${t.source === 'upload'
+            ? `<button type="button" data-music-delete="${esc(t.id)}" title="Delete uploaded track" class="px-2 py-1 rounded-lg bg-rose-900/60 hover:bg-rose-800 text-rose-200 text-xs font-semibold">✕</button>`
+            : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function loadLobbyMusic() {
+  const seq = lobbyMusicSaveSeq;
+  const data = await api('/admin/api/lobby-music');
+  if (seq !== lobbyMusicSaveSeq) return lobbyMusicTracks;
+  lobbyMusicTracks = data.tracks || [];
+  lastConfirmedLobbyTracks = lobbyMusicTracks.map(t => ({ ...t }));
+  renderLobbyMusic();
+  return lobbyMusicTracks;
+}
+
+async function saveLobbyMusicOrder(nextTracks, previousTracks) {
+  if (!lastConfirmedLobbyTracks) {
+    lastConfirmedLobbyTracks = previousTracks.map(t => ({ ...t }));
+  }
+  const seq = ++lobbyMusicSaveSeq;
+  lobbyMusicTracks = nextTracks;
+  renderLobbyMusic();
+  setMusicStatus('Saving…');
+  try {
+    const payload = { tracks: nextTracks.map(t => ({ id: t.id, enabled: Boolean(t.enabled) })) };
+    const data = await api('/admin/api/lobby-music', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    if (seq !== lobbyMusicSaveSeq) return;
+    lobbyMusicTracks = data.tracks || nextTracks;
+    lastConfirmedLobbyTracks = lobbyMusicTracks.map(t => ({ ...t }));
+    renderLobbyMusic();
+    setMusicStatus('Saved · live TVs updated', 'ok');
+  } catch (err) {
+    if (seq !== lobbyMusicSaveSeq) return;
+    lobbyMusicTracks = (lastConfirmedLobbyTracks || previousTracks).map(t => ({ ...t }));
+    renderLobbyMusic();
+    setMusicStatus(err.message || 'Could not save playlist', 'error');
+  }
+}
+
+async function moveLobbyTrack(id, delta) {
+  const idx = lobbyMusicTracks.findIndex(t => t.id === id);
+  const nextIdx = idx + delta;
+  if (idx === -1 || nextIdx < 0 || nextIdx >= lobbyMusicTracks.length) return;
+  const previous = lobbyMusicTracks.map(t => ({ ...t }));
+  const next = previous.slice();
+  const [moved] = next.splice(idx, 1);
+  next.splice(nextIdx, 0, moved);
+  await saveLobbyMusicOrder(next, previous);
+}
+
+async function reorderLobbyTrack(fromId, toId) {
+  if (!fromId || !toId || fromId === toId) return;
+  const fromIdx = lobbyMusicTracks.findIndex(t => t.id === fromId);
+  const toIdx = lobbyMusicTracks.findIndex(t => t.id === toId);
+  if (fromIdx === -1 || toIdx === -1) return;
+  const previous = lobbyMusicTracks.map(t => ({ ...t }));
+  const next = previous.slice();
+  const [moved] = next.splice(fromIdx, 1);
+  next.splice(toIdx, 0, moved);
+  await saveLobbyMusicOrder(next, previous);
+}
+
+async function toggleLobbyTrack(id) {
+  const idx = lobbyMusicTracks.findIndex(t => t.id === id);
+  if (idx === -1) return;
+  const previous = lobbyMusicTracks.map(t => ({ ...t }));
+  const next = previous.map((t, i) => (i === idx ? { ...t, enabled: !t.enabled } : t));
+  await saveLobbyMusicOrder(next, previous);
+}
+
+function toggleLobbyPreview(id) {
+  const track = lobbyMusicTracks.find(t => t.id === id);
+  if (!track) return;
+  if (!previewAudio) {
+    previewAudio = new Audio();
+    previewAudio.addEventListener('ended', () => { previewTrackId = null; renderLobbyMusic(); });
+    previewAudio.addEventListener('error', () => { previewTrackId = null; renderLobbyMusic(); });
+  }
+  if (previewTrackId === id && !previewAudio.paused) {
+    stopLobbyPreview();
+    renderLobbyMusic();
+    return;
+  }
+  previewAudio.pause();
+  previewAudio.currentTime = 0;
+  previewAudio.src = track.url;
+  previewTrackId = id;
+  previewAudio.play().catch(() => {
+    previewTrackId = null;
+    renderLobbyMusic();
+  });
+  renderLobbyMusic();
+}
+
+async function deleteLobbyTrack(id) {
+  const track = lobbyMusicTracks.find(t => t.id === id);
+  if (!track || track.source !== 'upload') return;
+  if (typeof confirm === 'function' && !confirm(`Delete uploaded track "${track.filename}"?`)) return;
+  if (previewTrackId === id) stopLobbyPreview();
+  try {
+    const data = await api(`/admin/api/lobby-music/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    lobbyMusicSaveSeq += 1;
+    lobbyMusicTracks = data.tracks || lobbyMusicTracks.filter(t => t.id !== id);
+    lastConfirmedLobbyTracks = lobbyMusicTracks.map(t => ({ ...t }));
+    renderLobbyMusic();
+    setMusicStatus(`Deleted ${track.filename}`, 'ok');
+  } catch (err) {
+    setMusicStatus(err.message || 'Delete failed', 'error');
+  }
+}
+
+async function uploadSingleLobbyFile(file, position) {
+  const init = await api('/admin/api/lobby-music/uploads', {
+    method: 'POST',
+    body: JSON.stringify({ filename: file.name, size: file.size, position }),
+  });
+  const uploadId = init.uploadId;
+  const chunkSize = init.chunkSize || (2 * 1024 * 1024);
+
+  try {
+    let offset = 0;
+    while (offset < file.size) {
+      const end = Math.min(file.size, offset + chunkSize);
+      const buf = await file.slice(offset, end).arrayBuffer();
+      const res = await fetch(`/admin/api/lobby-music/uploads/${encodeURIComponent(uploadId)}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'X-Chunk-Offset': String(offset),
+        },
+        body: buf,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        window.location.href = '/admin/login';
+        throw new Error('Unauthorized');
+      }
+      if (!res.ok) throw new Error(data.error || `Chunk upload failed (HTTP ${res.status})`);
+      offset = end;
+      const pct = Math.min(100, Math.round((offset / Math.max(1, file.size)) * 100));
+      setUploadStatus(`Uploading ${file.name}… ${pct}%`);
+    }
+
+    const done = await api(`/admin/api/lobby-music/uploads/${encodeURIComponent(uploadId)}/finish`, {
+      method: 'POST',
+    });
+    lobbyMusicSaveSeq += 1;
+    lobbyMusicTracks = done.tracks || lobbyMusicTracks;
+    lastConfirmedLobbyTracks = lobbyMusicTracks.map(t => ({ ...t }));
+    renderLobbyMusic();
+    return done;
+  } catch (err) {
+    await fetch(`/admin/api/lobby-music/uploads/${encodeURIComponent(uploadId)}`, { method: 'DELETE' }).catch(() => {});
+    throw err;
+  }
+}
+
+async function uploadLobbyFiles(files) {
+  const list = Array.from(files || []);
+  if (!list.length) return;
+  const addFirst = Boolean(document.getElementById('lobbyMusicAddFirst')?.checked);
+  let uploadedCount = 0;
+  let sawXingWarning = false;
+
+  for (let i = 0; i < list.length; i++) {
+    const file = list[i];
+    setUploadStatus(`Uploading ${file.name} (${i + 1}/${list.length})… 0%`);
+    try {
+      const done = await uploadSingleLobbyFile(file, addFirst ? 'first' : 'end');
+      uploadedCount += 1;
+      if (done.xingWarning) sawXingWarning = true;
+    } catch (err) {
+      setUploadStatus(`Upload failed for ${file.name}: ${err.message}`, 'error');
+      return;
+    }
+  }
+
+  if (sawXingWarning) {
+    setUploadStatus(`Uploaded ${uploadedCount} track${uploadedCount === 1 ? '' : 's'} (note: MP3 missing Xing header — fade-out timing may be approximate)`, 'warn');
+  } else {
+    setUploadStatus(`Uploaded ${uploadedCount} track${uploadedCount === 1 ? '' : 's'} and synced to live TVs`, 'ok');
+  }
+}
+
+async function restartLiveLobbyMusic() {
+  try {
+    const data = await api('/admin/api/lobby-music/restart', { method: 'POST' });
+    const n = Number(data.notifiedHosts || 0);
+    setMusicStatus(
+      n > 0 ? `Sent #1 to ${n} live TV${n === 1 ? '' : 's'}` : 'No live TVs connected',
+      n > 0 ? 'ok' : 'muted'
+    );
+  } catch (err) {
+    setMusicStatus(err.message || 'Could not update live TVs', 'error');
+  }
+}
+
+const lobbyMusicListEl = document.getElementById('lobbyMusicList');
+if (lobbyMusicListEl) {
+  lobbyMusicListEl.addEventListener('click', e => {
+    const btn = e.target?.closest?.('button');
+    if (!btn) return;
+    if (btn.dataset.musicPreview) toggleLobbyPreview(btn.dataset.musicPreview);
+    else if (btn.dataset.musicUp) moveLobbyTrack(btn.dataset.musicUp, -1);
+    else if (btn.dataset.musicDown) moveLobbyTrack(btn.dataset.musicDown, 1);
+    else if (btn.dataset.musicToggle) toggleLobbyTrack(btn.dataset.musicToggle);
+    else if (btn.dataset.musicDelete) deleteLobbyTrack(btn.dataset.musicDelete);
+  });
+  lobbyMusicListEl.addEventListener('dragstart', e => {
+    const row = e.target?.closest?.('[data-music-row-id]');
+    if (!row) return;
+    draggedTrackId = row.dataset.musicRowId;
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', draggedTrackId);
+    }
+  });
+  lobbyMusicListEl.addEventListener('dragover', e => {
+    const row = e.target?.closest?.('[data-music-row-id]');
+    if (!row || !draggedTrackId) return;
+    e.preventDefault();
+    row.classList?.add('border-sky-400');
+  });
+  lobbyMusicListEl.addEventListener('dragleave', e => {
+    const row = e.target?.closest?.('[data-music-row-id]');
+    row?.classList?.remove('border-sky-400');
+  });
+  lobbyMusicListEl.addEventListener('drop', e => {
+    const row = e.target?.closest?.('[data-music-row-id]');
+    if (!row || !draggedTrackId) return;
+    e.preventDefault();
+    row.classList?.remove('border-sky-400');
+    const targetId = row.dataset.musicRowId;
+    const fromId = draggedTrackId;
+    draggedTrackId = null;
+    reorderLobbyTrack(fromId, targetId);
+  });
+  lobbyMusicListEl.addEventListener('dragend', () => {
+    draggedTrackId = null;
+  });
+}
+
+document.getElementById('lobbyMusicRestartBtn')?.addEventListener('click', restartLiveLobbyMusic);
+
+const musicFileInput = document.getElementById('lobbyMusicFileInput');
+if (musicFileInput) {
+  musicFileInput.addEventListener('change', async e => {
+    const files = e.target?.files;
+    if (files && files.length) await uploadLobbyFiles(files);
+    if (e.target) e.target.value = '';
+  });
+}
+
+const musicDropzone = document.getElementById('lobbyMusicDropzone');
+if (musicDropzone) {
+  musicDropzone.addEventListener('dragover', e => {
+    e.preventDefault();
+    musicDropzone.classList?.add('border-sky-400', 'bg-slate-900');
+  });
+  musicDropzone.addEventListener('dragleave', () => {
+    musicDropzone.classList?.remove('border-sky-400', 'bg-slate-900');
+  });
+  musicDropzone.addEventListener('drop', async e => {
+    e.preventDefault();
+    musicDropzone.classList?.remove('border-sky-400', 'bg-slate-900');
+    const files = e.dataTransfer?.files;
+    if (files && files.length) await uploadLobbyFiles(files);
+  });
+}
+
+Promise.all([loadMe(), loadKeys(), loadGames(), loadLobbyMusic()]).catch(() => {});

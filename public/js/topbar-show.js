@@ -697,6 +697,253 @@ function tbsBotPose(loc, idx, kind, reduced, ctx) {
   return out;
 }
 
+/**
+ * Maps a robot's show pose ({ step, wheel, boost, tilt, arm, look, jitter, mood, flip, away })
+ * onto 3D transforms for the SH.avatarRig models (public/js/avatar-3d.js). Writes into `out`
+ * when given so per-frame animation allocates nothing. Pure; for tests.
+ */
+function tbsBot3dPose(kind, p, out) {
+  p = p || {};
+  out = out || {};
+  var flip = p.flip === -1 ? -1 : 1;
+  var tiltRad = (p.tilt || 0) * Math.PI / 180;
+  var lookRad = Math.max(-0.85, Math.min(0.85, (p.look || 0) * Math.PI / 180));
+  var arm = Math.max(0, Math.min(1, p.arm || 0));
+  var step = p.step || 0;
+  var s = Math.sin(2 * Math.PI * step);
+  var worried = (p.mood || 'calm') === 'worried';
+  var baseYaw = flip * 0.42;
+  var jitter = p.jitter || 0;
+
+  out.bodyX = 0; out.bodyY = 0; out.bodyRx = 0; out.bodyRy = baseYaw; out.bodyRz = -tiltRad;
+  out.headRx = 0; out.headRy = lookRad * 0.85; out.headRz = 0;
+  out.legLRx = 0; out.legLRz = 0; out.legRRx = 0; out.legRRz = 0;
+  out.armLRx = 0; out.armLRz = 0; out.armRRx = 0; out.armRRz = 0;
+  out.flameScale = 1; out.shadowOp = 0.28; out.worried = worried;
+
+  if (kind === 'boot') {
+    out.bodyY = Math.abs(s) * 0.06;
+    out.bodyRy = baseYaw + (worried ? Math.sin(step * 20) * 0.08 : 0);
+    out.headRx = worried ? 0.12 : 0;
+    out.headRy = lookRad * 0.9;
+    out.headRz = worried ? -0.1 : 0;
+    out.legLRx = s * 0.55;
+    out.legRRx = -s * 0.55;
+    out.armLRx = -s * 0.42;
+    out.armRRx = s * 0.42;
+    out.armLRz = -arm * 1.9;
+    out.armRRz = arm * 1.9;
+  } else if (kind === 'glitch') {
+    var gw = (p.wheel || 0) * Math.PI / 180;
+    var stride = Math.sin(gw);
+    out.bodyX = jitter * 0.14 * (Math.floor(Math.abs(gw) * 3) % 2 ? 1 : -1);
+    out.bodyY = Math.abs(stride) * 0.05;
+    out.bodyRy = baseYaw + jitter * 0.38;
+    out.bodyRz = -tiltRad + jitter * 0.12;
+    out.headRy = lookRad * 0.85 - jitter * 0.3;
+    out.headRz = worried ? 0.16 : jitter * 0.15;
+    out.legLRx = stride * 0.48;
+    out.legRRx = -stride * 0.48;
+    out.armLRx = -stride * 0.35;
+    out.armRRx = stride * 0.35;
+    out.armLRz = -arm * 2.1 - (jitter ? 0.35 : 0);
+    out.armRRz = arm * 1.8 + (jitter ? 0.25 : 0);
+  } else if (kind === 'dizzy') {
+    var dw = (p.wheel || 0) * Math.PI / 180;
+    var pedal = Math.sin(dw * 0.5);
+    out.bodyY = Math.abs(Math.sin(step * Math.PI * 2)) * 0.06;
+    out.bodyRy = baseYaw + Math.sin(dw * 0.25) * 0.18;
+    out.headRx = Math.sin(step * Math.PI * 2) * 0.08 + (worried ? 0.12 : 0);
+    out.headRy = lookRad * 0.75;
+    out.headRz = worried ? -0.14 : Math.sin(dw * 0.25) * 0.08;
+    out.legLRx = pedal * 0.62;
+    out.legRRx = -pedal * 0.62;
+    out.armLRx = -pedal * 0.25;
+    out.armRRx = pedal * 0.25;
+    out.armLRz = -arm * 2.1;
+    out.armRRz = arm * 1.35;
+  } else {
+    var boost = Math.max(0, Math.min(1, p.boost == null ? 0.4 : p.boost));
+    out.flameScale = 0.55 + 1.15 * boost;
+    out.bodyY = 0.08 + boost * 0.12;
+    out.bodyRy = (p.away && p.away > 0.05) ? flip * 0.22 : baseYaw;
+    out.headRx = worried ? 0.15 : -0.06 * boost;
+    out.headRy = lookRad * 0.6;
+    out.legLRx = 0.28 + boost * 0.22;
+    out.legRRx = 0.28 + boost * 0.22;
+    out.legLRz = -0.18 * boost;
+    out.legRRz = 0.18 * boost;
+    out.armLRz = -0.35 - arm * 1.65;
+    out.armRRz = 0.35 + arm * 1.65;
+    out.shadowOp = Math.max(0.05, 0.28 * (1 - boost * 0.75));
+  }
+  return out;
+}
+
+/**
+ * Single shared offscreen Three.js WebGL stage that renders each AI robot's 3D SH.avatarRig
+ * model onto its lightweight 2D canvas inside .tbs-actor. Uses one WebGL context total (disposed
+ * as soon as the show stops) and a small pixel buffer so weak Android TV chips stay smooth.
+ */
+function createTopbarBotStage3d(THREE, castDefs, opts) {
+  opts = opts || {};
+  var lowPower = !!opts.lowPower;
+  var avatarRig = opts.avatarRig || (typeof SH !== 'undefined' && SH.avatarRig);
+  if (!THREE || typeof avatarRig !== 'function') return null;
+
+  var rw = lowPower ? 160 : 240;
+  var rh = lowPower ? 192 : 288;
+  var renderer = opts.rendererFactory
+    ? opts.rendererFactory(THREE, rw, rh, lowPower)
+    : new THREE.WebGLRenderer({ alpha: true, antialias: !lowPower, powerPreference: lowPower ? 'default' : 'high-performance' });
+  if (renderer.setClearColor) renderer.setClearColor(0x000000, 0);
+  if (renderer.setPixelRatio) renderer.setPixelRatio(1);
+  if (renderer.setSize) renderer.setSize(rw, rh, false);
+
+  var scene = new THREE.Scene();
+  var camera = new THREE.PerspectiveCamera(34, 200 / 240, 0.1, 20);
+  camera.position.set(0, 1.18, 3.6);
+  camera.lookAt(0, 0.99, 0);
+
+  scene.add(new THREE.HemisphereLight(0xf8fafc, 0x334155, 1.45));
+  var keyLight = new THREE.DirectionalLight(0xffffff, 1.45);
+  keyLight.position.set(-2.5, 4.5, 4.0);
+  scene.add(keyLight);
+  var rimLight = new THREE.DirectionalLight(0x7dd3fc, 1.05);
+  rimLight.position.set(3.0, 2.5, -2.5);
+  scene.add(rimLight);
+
+  var shadowGeo = new THREE.CircleGeometry(0.42, 16);
+  var sweatDropGeo = new THREE.SphereGeometry(0.055, 8, 8);
+  var sweatTipGeo = new THREE.ConeGeometry(0.052, 0.11, 8);
+  var sweatMat = new THREE.MeshBasicMaterial({ color: 0x7dd3fc });
+
+  function wrapPivot(parent, child, px, py, pz) {
+    if (!child || child.parent !== parent) return child;
+    var g = new THREE.Group();
+    g.position.set(px, py, pz);
+    parent.add(g);
+    child.position.set(child.position.x - px, child.position.y - py, child.position.z - pz);
+    g.add(child);
+    return g;
+  }
+
+  var actors = (castDefs || []).map(function (def) {
+    var rig = avatarRig(THREE, def.avatar);
+    var flame = null;
+    // Gentle self-illumination keeps dark hulls readable on the navy topbar without losing 3D shading.
+    rig.group.traverse(function (o) {
+      if (o.isMesh && o.material && o.material.emissive && o.material.color) {
+        o.material.emissive.copy(o.material.color);
+        o.material.emissiveIntensity = 0.25;
+      }
+      if (def.kind === 'zoom' && o.isMesh && o.geometry && o.geometry.type === 'ConeGeometry' && o.position.z < -0.2) {
+        flame = o;
+      }
+    });
+
+    var shoulderY = rig.shoulderY || 0.98;
+    var legL = wrapPivot(rig.group, rig.legL, -0.13, 0.46, 0);
+    var legR = wrapPivot(rig.group, rig.legR, 0.13, 0.46, 0);
+    var armL = wrapPivot(rig.group, rig.armL, -0.34, shoulderY, 0);
+    var armR = wrapPivot(rig.group, rig.armR, 0.34, shoulderY, 0);
+
+    var sweat = new THREE.Group();
+    sweat.position.set(def.kind === 'zoom' ? 0.28 : 0.36, def.kind === 'zoom' ? 0.08 : 0.22, 0.14);
+    sweat.add(new THREE.Mesh(sweatDropGeo, sweatMat));
+    var tip = new THREE.Mesh(sweatTipGeo, sweatMat);
+    tip.position.y = 0.07;
+    sweat.add(tip);
+    sweat.visible = false;
+    if (rig.head) rig.head.add(sweat);
+
+    var shadowMat = new THREE.MeshBasicMaterial({ color: 0x0b1530, transparent: true, opacity: 0.28, depthWrite: false });
+    var shadow = new THREE.Mesh(shadowGeo, shadowMat);
+    shadow.rotation.x = -Math.PI / 2;
+    shadow.position.y = 0.01;
+
+    var root = new THREE.Group();
+    root.add(shadow);
+    root.add(rig.group);
+    root.visible = false;
+    scene.add(root);
+
+    return {
+      kind: def.kind || 'boot',
+      root: root,
+      group: rig.group,
+      head: rig.head,
+      legL: legL,
+      legR: legR,
+      armL: armL,
+      armR: armR,
+      flame: flame,
+      flameBaseScale: flame ? [flame.scale.x, flame.scale.y, flame.scale.z] : null,
+      shadow: shadow,
+      sweat: sweat,
+    };
+  });
+
+  var scratch = {};
+  var disposed = false;
+
+  function renderActor(idx, pose, targetCtx) {
+    if (disposed) return;
+    var a = actors[idx];
+    if (!a) return;
+    var p3 = tbsBot3dPose(a.kind, pose, scratch);
+    a.group.position.set(p3.bodyX, p3.bodyY, 0);
+    a.group.rotation.set(p3.bodyRx, p3.bodyRy, p3.bodyRz);
+    if (a.head) a.head.rotation.set(p3.headRx, p3.headRy, p3.headRz);
+    if (a.legL) a.legL.rotation.set(p3.legLRx, 0, p3.legLRz);
+    if (a.legR) a.legR.rotation.set(p3.legRRx, 0, p3.legRRz);
+    if (a.armL) a.armL.rotation.set(p3.armLRx, 0, p3.armLRz);
+    if (a.armR) a.armR.rotation.set(p3.armRRx, 0, p3.armRRz);
+    if (a.flame && a.flameBaseScale) {
+      var w = 0.85 + 0.25 * Math.min(1.5, p3.flameScale - 0.5);
+      a.flame.scale.set(a.flameBaseScale[0] * w, a.flameBaseScale[1] * p3.flameScale, a.flameBaseScale[2] * w);
+    }
+    a.shadow.material.opacity = p3.shadowOp;
+    a.sweat.visible = p3.worried;
+
+    a.root.visible = true;
+    renderer.render(scene, camera);
+    if (targetCtx && renderer.domElement) {
+      targetCtx.clearRect(0, 0, rw, rh);
+      targetCtx.drawImage(renderer.domElement, 0, 0, rw, rh);
+    }
+    a.root.visible = false;
+  }
+
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    var geos = new Set();
+    var mats = new Set();
+    scene.traverse(function (o) {
+      if (o.geometry) geos.add(o.geometry);
+      var m = o.material;
+      if (Array.isArray(m)) m.forEach(function (item) { if (item) mats.add(item); });
+      else if (m) mats.add(m);
+    });
+    geos.forEach(function (g) { if (g.dispose) g.dispose(); });
+    mats.forEach(function (m) {
+      if (m.map && m.map.dispose) m.map.dispose();
+      if (m.dispose) m.dispose();
+    });
+    if (renderer.dispose) renderer.dispose();
+    if (renderer.forceContextLoss) renderer.forceContextLoss();
+  }
+
+  return {
+    width: rw,
+    height: rh,
+    actors: actors,
+    renderActor: renderActor,
+    dispose: dispose,
+  };
+}
+
 // ---- 2D affine helpers (SVG matrix order: a b c d e f) ----
 function tbsMul(m, n) {
   return [m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1], m[0] * n[2] + m[2] * n[3],
@@ -976,8 +1223,8 @@ function tbsPoolKill(pool, i) {
  * flows. Feed it the time between frames; it steps down a tier after 1.5 s of slow
  * frames (under ~42 fps) and back up after 8 s of fast ones, at most once, so it never
  * flaps. Tier 0 is the full show, 1 drops the shine and halves the fire, 2 thins the fire
- * more and moves the lion, the frog, the shake and the equalizer every other frame.
- * Nothing of the Easter egg ever disappears or freezes. Pure; for tests.
+ * more, drops offscreen CSS filters, and paces the show to 30 fps so frames don't
+ * pile up on slow TVs. Nothing of the Easter egg ever disappears or freezes. Pure; for tests.
  */
 function tbsGovernor(mode) {
   var fixed = mode === 'full' ? 0 : mode === 'lite' ? 2 : -1;
@@ -1018,6 +1265,7 @@ function createTopbarShow(opts) {
   var exitAt = 0;
   var lastNow = 0;
   var frameNo = 0;
+  var rafTick = 0;
   var gov = tbsGovernor(opts.quality);
   var tier = gov.tier;
   var bounds = { left: 0, right: 0, width: 0 };
@@ -1049,28 +1297,118 @@ function createTopbarShow(opts) {
       '<span class="tbs-chip-dots"><i></i><i></i><i></i><i></i></span></div>' +
     '<div class="tbs-singer"><div class="tbs-singer-glow"></div>' + TBS_SINGER_SVG + '</div>' +
     '<div class="tbs-flash"></div>';
-  // The AI cast: one body per character, never a copy (aiRobot in ai-robots.js). Each robot
-  // dances in the bar, behind the singer, and moves to the cast layer over the page (above the
-  // topbar, which would clip it) while it is away from its spot, as in the Board Crash.
+  // The AI cast: rendered with the 3D SH.avatarRig models (avatar-3d.js) via one shared
+  // offscreen WebGL stage created while the show runs and disposed as soon as it stops,
+  // with automatic fallback to the 2D SVG rigs (ai-robots.js) if Three.js/WebGL is unavailable.
+  // Each robot dances in the bar, behind the singer, and moves to the cast layer over the page
+  // (above the topbar, which would clip it) while it is away from its spot, as in the Board Crash.
   var TBS_ROLE = { boot: 'nova', glitch: 'glitch', dizzy: 'byte', zoom: 'turbo' };
   var TBS_BAR_H = 64;                       // a robot's height in the bar, px
   var bots = [];
   var castLayer = null;
+  var bots3d = null;
+  var bots3dLoading = false;
+  var bots3dFailed = false;
+  var bots3dGen = 0;
+  var canUse3d = typeof SH !== 'undefined' && typeof SH.loadThree === 'function' && typeof SH.avatarRig === 'function';
   var cast = typeof SH_AI !== 'undefined' && SH_AI ? SH_AI.slice(0, TBS_BOT_SPOTS.length) : [];
   cast.forEach(function (persona, i) {
     var kind = persona.entrance || 'boot';
     var wrap = document.createElement('div');
     wrap.className = 'tbs-actor tbs-actor-' + kind;
-    var rig = typeof aiRobot === 'function' ? aiRobot(persona.name, kind) : typeof createAiRobot === 'function' ? createAiRobot(kind) : null;
-    if (!rig) { var face = document.createElement('span'); face.className = 'tbs-actor-face'; face.textContent = persona.avatar; wrap.appendChild(face); }
+    var canvas = null;
+    var rig = null;
+    if (canUse3d) {
+      canvas = document.createElement('canvas');
+      canvas.className = 'tbs-bot-canvas';
+      wrap.appendChild(canvas);
+    } else {
+      rig = typeof aiRobot === 'function' ? aiRobot(persona.name, kind) : typeof createAiRobot === 'function' ? createAiRobot(kind) : null;
+      if (!rig) { var face = document.createElement('span'); face.className = 'tbs-actor-face'; face.textContent = persona.avatar; wrap.appendChild(face); }
+    }
     var emote = document.createElement('span');
     emote.className = 'tbs-actor-emote';
     wrap.appendChild(emote);
     var smoke = null;
     if (kind === 'zoom') { smoke = document.createElement('span'); smoke.className = 'tbs-crash-smoke'; wrap.appendChild(smoke); }
     stage.insertBefore(wrap, stage.querySelector('.tbs-singer'));
-    bots.push({ wrap: wrap, rig: rig, kind: kind, role: TBS_ROLE[kind] || 'nova', idx: i, emote: emote, smoke: smoke, host: 'bar', emoteText: '' });
+    bots.push({
+      wrap: wrap, rig: rig, canvas: canvas, ctx2d: null,
+      name: persona.name, avatar: persona.avatar, kind: kind,
+      role: TBS_ROLE[kind] || 'nova', idx: i, emote: emote, smoke: smoke, host: 'bar', emoteText: '',
+    });
   });
+  function fallbackBotsToSvg() {
+    bots.forEach(function (b) {
+      if (b.canvas && b.canvas.parentNode) b.canvas.parentNode.removeChild(b.canvas);
+      b.canvas = null;
+      b.ctx2d = null;
+      if (b.rig) return;
+      b.rig = typeof aiRobot === 'function' ? aiRobot(b.name, b.kind) : typeof createAiRobot === 'function' ? createAiRobot(b.kind) : null;
+      if (b.rig) {
+        b.wrap.insertBefore(b.rig.el, b.wrap.firstChild);
+      } else if (!b.wrap.querySelector('.tbs-actor-face')) {
+        var face = document.createElement('span');
+        face.className = 'tbs-actor-face';
+        face.textContent = b.avatar;
+        b.wrap.insertBefore(face, b.wrap.firstChild);
+      }
+    });
+  }
+  function ensureBots3d() {
+    if (!canUse3d || bots3d || bots3dLoading || bots3dFailed || !bots.length) return;
+    bots3dLoading = true;
+    var gen = ++bots3dGen;
+    SH.loadThree().then(function (THREE) {
+      bots3dLoading = false;
+      if (!running || exitAt || gen !== bots3dGen) return;
+      try {
+        var lowPower = !!(typeof SH !== 'undefined' && SH.stage3d && SH.stage3d.lowPower) || tier >= 2;
+        bots3d = createTopbarBotStage3d(THREE, bots, { lowPower: lowPower, avatarRig: SH.avatarRig });
+        if (!bots3d) throw new Error('3D bot stage unavailable');
+        bots.forEach(function (b) {
+          if (!b.canvas) {
+            b.canvas = document.createElement('canvas');
+            b.canvas.className = 'tbs-bot-canvas';
+            b.wrap.insertBefore(b.canvas, b.wrap.firstChild);
+          }
+          b.canvas.width = bots3d.width;
+          b.canvas.height = bots3d.height;
+          b.ctx2d = tbsCanvas2d(b.canvas);
+        });
+      } catch (_) {
+        bots3dFailed = true;
+        disposeBots3d();
+        fallbackBotsToSvg();
+      }
+    }).catch(function () {
+      bots3dLoading = false;
+      bots3dFailed = true;
+      fallbackBotsToSvg();
+    });
+  }
+  function disposeBots3d() {
+    bots3dGen++;
+    bots3dLoading = false;
+    if (bots3d) {
+      var w = bots3d.width, h = bots3d.height;
+      bots3d.dispose();
+      bots3d = null;
+      bots.forEach(function (b) {
+        if (b.ctx2d) b.ctx2d.clearRect(0, 0, w, h);
+      });
+    }
+  }
+  function poseBot(b, pose) {
+    if (bots3d && b.ctx2d) {
+      bots3d.renderActor(b.idx, pose, b.ctx2d);
+      return;
+    }
+    if (b.rig) {
+      if (b.rig.el.parentNode !== b.wrap) b.wrap.insertBefore(b.rig.el, b.wrap.firstChild);  // back from a game intro
+      b.rig.pose(pose);
+    }
+  }
   function castRoot() {
     if (!castLayer) { castLayer = document.createElement('div'); castLayer.className = 'tbs-cast'; castLayer.setAttribute('aria-hidden', 'true'); document.body.appendChild(castLayer); }
     return castLayer;
@@ -1379,6 +1717,13 @@ function createTopbarShow(opts) {
   function frame(now) {
     raf = 0;
     if (!running || !map) return;
+    rafTick++;
+    // In tier 2 (slow TV), pace the show to 30 fps by skipping every other rAF tick so
+    // frames don't queue up in the GPU; dt still uses real elapsed time.
+    if (tier >= 2 && (rafTick & 1)) {
+      raf = requestAnimationFrame(frame);
+      return;
+    }
     if (lastNow) {
       var nextTier = tbsGovern(gov, now - lastNow);
       if (nextTier !== tier) setTier(nextTier);
@@ -1426,7 +1771,7 @@ function createTopbarShow(opts) {
     // without repainting the bar.
     css(el.washSpot, 'transform', 'translateX(' + px.toFixed(0) + 'px)');
     css(el.washSpot, 'opacity', (0.5 + 0.5 * live).toFixed(2));
-    css(el.wash, 'filter', loc.kind === 'd' && loc.stage === 'dance' ? 'hue-rotate(' + ((loc.bar % 4) * 32) + 'deg)' : 'none'); // once per bar
+    css(el.wash, 'filter', tier < 2 && loc.kind === 'd' && loc.stage === 'dance' ? 'hue-rotate(' + ((loc.bar % 4) * 32) + 'deg)' : 'none'); // once per bar
     // Strobe on the eighths while a drop builds.
     css(el.wash, 'opacity', (0.35 + 0.5 * live * hit + (loc.riser && !reduced ? 0.35 * riserAmt * (Math.sin(p * Math.PI * 4) > 0 ? 1 : 0.2) : 0)).toFixed(3));
     css(el.washBright, 'opacity', (0.22 * riserAmt).toFixed(3));
@@ -1437,7 +1782,7 @@ function createTopbarShow(opts) {
     css(el.singerGlow, 'opacity', (hit * live).toFixed(3));
     if (el.chip.classList.contains('tbs-chip-on')) css(el.chip, 'transform', 'translate(-50%, -50%) scale(' + (1 + hit * live * 0.08).toFixed(3) + ')');
     // Equalizer along the bottom edge, drawn on one canvas: each beat deals new heights.
-    if (eqCtx && (tier < 2 || frameNo % 2 === 0)) {
+    if (eqCtx) {
       eqCtx.setTransform(eqDpr, 0, 0, eqDpr, 0, 0);
       eqCtx.clearRect(0, 0, eqW, eqH);
       eqCtx.globalAlpha = 0.35 + live * 0.45;
@@ -1471,11 +1816,9 @@ function createTopbarShow(opts) {
       : tbsSongLines(trackName(), t);
     for (var bi = 0; bi < bots.length; bi++) {
       var B = bots[bi], role = cs && cs[B.role];
-      if (B.rig && B.rig.el.parentNode !== B.wrap) B.wrap.insertBefore(B.rig.el, B.wrap.firstChild);  // back from a game intro
+      if (!bots3d && B.rig && B.rig.el.parentNode !== B.wrap) B.wrap.insertBefore(B.rig.el, B.wrap.firstChild);  // back from a game intro
       if (role && role.away > 0.001) { botAway(B, role, cs); continue; }
       botHost(B, 'bar');
-      // Four small transforms are cheap, so they stay on a slow TV too (only less often there).
-      if (tier >= 2 && frameNo % 2 && !cs) continue;
       var bp = exiting ? { show: false, op: 0 } : tbsBotPose(loc, bi, B.kind, reduced, { singer: el.singer._x, w: w });
       var re = role && role.react;
       if (re || (!exiting && talking(said, B.role))) { bp.show = true; bp.op = Math.max(bp.op, 1); }
@@ -1500,15 +1843,16 @@ function createTopbarShow(opts) {
         if (re.jitter) pose.jitter = re.jitter;
       }
       B.barX = bx;
-      botPlace(B, bx, hdr.h - 4 + by, brot, TBS_BAR_H / 240, bflip * (re ? 1 : bp.sx || 1), bsy);
-      if (B.rig) B.rig.pose(pose);
+      pose.flip = bflip;
+      var sx = re ? 1 : (bp.sx || 1);
+      botPlace(B, bx, hdr.h - 4 + by, brot, TBS_BAR_H / 240, bots3d ? sx : bflip * sx, bsy);
+      poseBot(B, pose);
       botEmote(B, emote);
     }
     crashBubbles(cs, said, singerVisible ? { x: hdr.left + px, y: hdr.top + hdr.h + 10, below: true } : null);
 
     // The lion and the frog dance under the QR code.
-    // A weak TV moves them every other frame; they never leave.
-    for (var dn = 0; (tier < 2 || frameNo % 2 === 0) && dn < dancers.length; dn++) {
+    for (var dn = 0; dn < dancers.length; dn++) {
       var dp = exiting ? { y: 0, rot: 0, sx: 1, sy: 1, px: 0, py: 0 } : tbsDancerPose(loc, dn, reduced);
       if (dancers[dn].rig) css(dancers[dn].rig, 'transform', 'translate3d(0,' + dp.y.toFixed(1) + 'px,0) rotateZ(' + dp.rot.toFixed(1) + 'deg) scale(' + dp.sx.toFixed(3) + ',' + dp.sy.toFixed(3) + ')');
       if (dancers[dn].paw) css(dancers[dn].paw, 'transform', 'translate3d(' + (dp.px * 1.6).toFixed(1) + 'px,' + (dp.py * 1.6).toFixed(1) + 'px,26px)');
@@ -1517,7 +1861,7 @@ function createTopbarShow(opts) {
     // The lobby boxes (vote options and panels) shake on the beat with her.
     // During the Board Crash the vote board belongs to the robots; otherwise it shakes along.
     // A weak TV shakes them every other frame, but they keep shaking.
-    if (!crashCards(cs, t) && (tier < 2 || frameNo % 2 === 0)) {
+    if (!crashCards(cs, t)) {
       var shake = exiting ? { vx: 0, vy: 0, kick: 0 } : tbsShake(loc, reduced);
       applyShake(shake, now);
     }
@@ -1550,6 +1894,7 @@ function createTopbarShow(opts) {
     if (tier >= 1) {
       shakeEls.options.forEach(function (o) { if (o._tbsShine) css(o._tbsShine, 'opacity', '0'); });
     }
+    if (tier >= 2) css(el.wash, 'filter', 'none');
     document.body.classList.toggle('tbs-lite', tier >= 2);
   }
 
@@ -1598,8 +1943,8 @@ function createTopbarShow(opts) {
     Y = Math.max(Y, 240 * s + 10);          // the head always stays on the screen
     var flip = p.flip === -1 ? -1 : 1;
     css(b.wrap, 'opacity', (p.flicker != null ? p.flicker : 1).toFixed(2));
-    botPlace(b, X, Y, b.kind === 'zoom' ? (p.tilt || 0) : 0, s, flip, 1);
-    if (b.rig) b.rig.pose({ step: p.step, mood: p.mood, wheel: p.wheel, boost: p.boost, tilt: b.kind === 'zoom' ? 0 : p.tilt, arm: p.arm, look: p.look, jitter: p.jitter });
+    botPlace(b, X, Y, b.kind === 'zoom' ? (p.tilt || 0) : 0, s, bots3d ? 1 : flip, 1);
+    poseBot(b, { step: p.step, mood: p.mood, wheel: p.wheel, boost: p.boost, tilt: b.kind === 'zoom' ? 0 : p.tilt, arm: p.arm, look: p.look, jitter: p.jitter, flip: flip, away: p.away });
     if (b.smoke) css(b.smoke, 'opacity', p.smoke ? '1' : '0');
     botEmote(b, '');
     st.screen[b.role] = { x: X, y: Y - 240 * s };
@@ -1757,6 +2102,7 @@ function createTopbarShow(opts) {
       clock = { ct: -1, at: 0, base: 0, baseAt: 0 };
       buildDancers();
       measure();
+      ensureBots3d();
       header.classList.add('tbs-on');
       document.body.classList.add('tbs-lobby-live');
       if (tier) setTier(tier);
@@ -1772,11 +2118,13 @@ function createTopbarShow(opts) {
   // Let her fly up out of the bar and the fire die down, then put the bar back.
   function stop() {
     if (!running) return;
+    disposeBots3d();
     if (!exitAt) exitAt = performance.now();
     if (!raf) raf = requestAnimationFrame(frame);
   }
   function finish() {
     crashReset();
+    disposeBots3d();
     running = false;
     exitAt = 0;
     map = null;
@@ -1819,6 +2167,6 @@ function createTopbarShow(opts) {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     tbsBeatIndex: tbsBeatIndex, tbsLocate: tbsLocate, tbsPose: tbsPose, tbsShake: tbsShake, tbsDancerPose: tbsDancerPose, tbsBotPose: tbsBotPose, tbsCrashState: tbsCrashState, tbsSongLines: tbsSongLines, TBS_SONG_LINES: TBS_SONG_LINES, tbsCrashCard: tbsCrashCard, TBS_CRASH_AT: TBS_CRASH_AT, TBS_CRASH_LINES: TBS_CRASH_LINES, tbsRand: tbsRand, tbsKnee: tbsKnee,
-    tbsGovernor: tbsGovernor, tbsGovern: tbsGovern, tbsHair: tbsHair, tbsHairStep: tbsHairStep, tbsPool: tbsPool, tbsPoolTake: tbsPoolTake, tbsPoolKill: tbsPoolKill, createTopbarShow: createTopbarShow, TBS_SHOWS: TBS_SHOWS, tbsBotMove: tbsBotMove, tbsBotGagOwner: tbsBotGagOwner, TBS_BOT_SPOTS: TBS_BOT_SPOTS,
+    tbsGovernor: tbsGovernor, tbsGovern: tbsGovern, tbsHair: tbsHair, tbsHairStep: tbsHairStep, tbsPool: tbsPool, tbsPoolTake: tbsPoolTake, tbsPoolKill: tbsPoolKill, createTopbarShow: createTopbarShow, TBS_SHOWS: TBS_SHOWS, tbsBotMove: tbsBotMove, tbsBotGagOwner: tbsBotGagOwner, TBS_BOT_SPOTS: TBS_BOT_SPOTS, tbsBot3dPose: tbsBot3dPose, createTopbarBotStage3d: createTopbarBotStage3d,
   };
 }

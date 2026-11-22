@@ -8,6 +8,7 @@ import manager from './session/manager.js';
 import { setupRoutes } from './transport/http.js';
 import { setupWebSocket } from './transport/ws-adapter.js';
 import { prewarmCache } from './fetcher/cached-fetcher.js';
+import { defaultLobbyMusicStore } from './music/lobby-store.js';
 
 // Load .env if present (Node >=20.6 built-in; no dependency needed).
 // Populates process.env with keys like GEMINI_API_KEY, DOMAIN, DISCORD_WEBHOOK_URL.
@@ -48,6 +49,7 @@ server.once('error', (err) => {
 server.listen(PORT, onListening);
 
 prewarmCache().catch(err => console.warn('[prewarm] startup cache warm failed:', err.message));
+defaultLobbyMusicStore.cleanupStaleUploads().catch(() => {});
 
 // Graceful shutdown
 function shutdown(signal) {

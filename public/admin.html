@@ -40,7 +40,7 @@
   <div class="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-8">
     <div class="space-y-1">
       <h1 class="text-2xl font-bold tracking-tight text-white">API Keys &amp; Custom Games</h1>
-      <p class="text-sm text-slate-400">OIDC-authenticated API key management, lobby visibility, and custom Card / Quiz game builder.</p>
+      <p class="text-sm text-slate-400">OIDC-authenticated API key management, lobby visibility, lobby music, and custom Card / Quiz game builder.</p>
     </div>
 
     <!-- API Keys -->
@@ -87,6 +87,38 @@
         <p class="text-xs text-slate-400">Choose which built-in and custom games appear in the room lobby. Changes apply immediately on refresh.</p>
       </div>
       <div id="lobbyVisibilityList" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3"></div>
+    </section>
+
+    <!-- Lobby Music -->
+    <section id="lobbyMusicSection" class="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-semibold">Lobby Music</h2>
+          <p class="text-xs text-slate-400">Choose, reorder, and upload tracks played in the TV lobby. Tracks fade in and out automatically; #1 arrives first in the lobby scene.</p>
+        </div>
+        <div class="flex items-center gap-3">
+          <span id="lobbyMusicStatus" class="text-xs text-slate-400"></span>
+          <button id="lobbyMusicRestartBtn" type="button" class="px-3.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-200 text-xs font-semibold transition-colors whitespace-nowrap">Play from #1 on live TVs</button>
+        </div>
+      </div>
+
+      <div id="lobbyMusicList" class="space-y-2"></div>
+
+      <div id="lobbyMusicDropzone" class="rounded-xl border border-dashed border-slate-700 bg-slate-950/70 p-4 flex flex-wrap items-center justify-between gap-3 transition-colors">
+        <div class="space-y-1 min-w-0">
+          <div class="text-sm font-semibold text-slate-200">Upload lobby songs</div>
+          <p class="text-xs text-slate-400">Drop audio files here (<code>.mp3</code>, <code>.ogg</code>, <code>.m4a</code>, <code>.wav</code> · max 25 MB each). Uploads in 2 MB chunks and persists in <code>data/music/lobby/</code>.</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-3">
+          <label class="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
+            <input id="lobbyMusicAddFirst" type="checkbox" class="rounded border-slate-600 bg-slate-900 text-sky-500 focus:ring-sky-500">
+            <span>Add at #1 (play first)</span>
+          </label>
+          <input id="lobbyMusicFileInput" type="file" accept=".mp3,.ogg,.m4a,.wav,audio/*" multiple class="hidden">
+          <label for="lobbyMusicFileInput" class="cursor-pointer px-3.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold transition-colors whitespace-nowrap">Choose files</label>
+        </div>
+        <div id="lobbyMusicUploadStatus" class="w-full text-xs text-slate-400"></div>
+      </div>
     </section>
 
     <!-- Custom Games -->
