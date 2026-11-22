@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createTestGame, act, isOver, viewFor } from '../../tests/engine/game-harness.js';
-import { manifestProblem } from '../../src/games/registry.js';
+import { createTestGame, act, isOver, viewFor, manifestProblem } from '../_sdk/index.js';
 import template from './index.js';
 
 describe('the card game template', () => {

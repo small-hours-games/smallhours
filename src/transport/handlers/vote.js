@@ -1,6 +1,7 @@
 // Small Hours - Category vote message handlers
 
 import { fetchCategories, MAIN_CATEGORY_IDS } from '../../fetcher/cached-fetcher.js';
+import { listGames } from '../../games/registry.js';
 import { potStartBlocker } from '../../pot/pot-room.js';
 
 /**
@@ -24,7 +25,8 @@ export async function handleStartCategoryVote(ws, meta, room, msg, ctx) {
     send(ws, { type: 'ERROR', message: 'Only admin can start voting' });
     return;
   }
-  const potBlocked = potStartBlocker(room, 'quiz');
+  const categoryGameId = room.pot?.gameType || listGames().find(g => g.categoryVote)?.id || 'quiz';
+  const potBlocked = potStartBlocker(room, categoryGameId);
   if (potBlocked) {
     send(ws, { type: 'ERROR', message: potBlocked });
     return;

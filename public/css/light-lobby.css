@@ -45,6 +45,7 @@
 .lobby-game-icon { width: 56px; height: 56px; display: grid; place-items: center; border-radius: 17px; font-size: 1.8rem; line-height: 1; flex-shrink: 0; background: linear-gradient(145deg,#628cff,#258ef7); box-shadow: inset 0 1px 0 rgba(255,255,255,.3),0 4px 9px rgba(40,80,120,.09); }
 [data-game="quiz"] .lobby-game-icon { background: linear-gradient(145deg,#ff537e,#e51e4f); }
 [data-game="music-quiz"] .lobby-game-icon { background: linear-gradient(145deg,#c56aff,#772ff4); }
+[data-game="card-palace"] .lobby-game-icon,
 [data-game="shithead"] .lobby-game-icon {
   position: relative;
   overflow: hidden;
@@ -56,6 +57,8 @@
     0 6px 14px rgba(217, 119, 6, 0.28);
   text-shadow: 0 2px 5px rgba(120, 53, 15, 0.45);
 }
+[data-game="card-palace"] .lobby-game-icon::before,
+[data-game="card-palace"] .lobby-game-icon::after,
 [data-game="shithead"] .lobby-game-icon::before,
 [data-game="shithead"] .lobby-game-icon::after {
   content: '';
@@ -68,19 +71,25 @@
   box-shadow: 0 2px 4px rgba(15, 23, 42, 0.18);
   pointer-events: none;
 }
+[data-game="card-palace"] .lobby-game-icon::before,
 [data-game="shithead"] .lobby-game-icon::before {
   bottom: 4px;
   left: 6px;
   transform: rotate(-16deg);
 }
+[data-game="card-palace"] .lobby-game-icon::after,
 [data-game="shithead"] .lobby-game-icon::after {
   bottom: 4px;
   right: 6px;
   transform: rotate(16deg);
 }
+[data-game="card-gin-rummy"] .lobby-game-icon,
 [data-game="gin-rummy"] .lobby-game-icon { background: linear-gradient(145deg,#59e6be,#0fa982); }
+[data-game="card-sjuan"] .lobby-game-icon,
 [data-game="sjuan"] .lobby-game-icon { background: linear-gradient(145deg,#fb923c,#ea580c); }
+[data-game="card-blackjack"] .lobby-game-icon,
 [data-game="blackjack"] .lobby-game-icon { background: linear-gradient(145deg,#34d399,#059669); }
+[data-game="card-texas-holdem"] .lobby-game-icon,
 [data-game="texas-holdem"] .lobby-game-icon { background: linear-gradient(145deg,#2dd4bf,#0d9488); }
 .lobby-game-info { min-width: 0; flex: 1; }
 .lobby-game-name { display: block; font-weight: 800; font-size: 1rem; line-height: 1.3; overflow-wrap: anywhere; }
@@ -1410,14 +1419,24 @@ body.in-game .mascot-duel-stage {
 .phone-screen #lobbySection .lobby-game-option[data-game="quiz"] { background: var(--game-quiz); }
 .host-screen:not(.in-game) .lobby-game-option[data-game="music-quiz"],
 .phone-screen #lobbySection .lobby-game-option[data-game="music-quiz"] { background: var(--game-music); }
+.host-screen:not(.in-game) .lobby-game-option[data-game="card-palace"],
+.phone-screen #lobbySection .lobby-game-option[data-game="card-palace"],
 .host-screen:not(.in-game) .lobby-game-option[data-game="shithead"],
 .phone-screen #lobbySection .lobby-game-option[data-game="shithead"] { background: var(--game-palace); }
+.host-screen:not(.in-game) .lobby-game-option[data-game="card-gin-rummy"],
+.phone-screen #lobbySection .lobby-game-option[data-game="card-gin-rummy"],
 .host-screen:not(.in-game) .lobby-game-option[data-game="gin-rummy"],
 .phone-screen #lobbySection .lobby-game-option[data-game="gin-rummy"] { background: var(--game-rummy); }
+.host-screen:not(.in-game) .lobby-game-option[data-game="card-sjuan"],
+.phone-screen #lobbySection .lobby-game-option[data-game="card-sjuan"],
 .host-screen:not(.in-game) .lobby-game-option[data-game="sjuan"],
 .phone-screen #lobbySection .lobby-game-option[data-game="sjuan"] { background: var(--game-sjuan); }
+.host-screen:not(.in-game) .lobby-game-option[data-game="card-blackjack"],
+.phone-screen #lobbySection .lobby-game-option[data-game="card-blackjack"],
 .host-screen:not(.in-game) .lobby-game-option[data-game="blackjack"],
 .phone-screen #lobbySection .lobby-game-option[data-game="blackjack"] { background: var(--game-blackjack); }
+.host-screen:not(.in-game) .lobby-game-option[data-game="card-texas-holdem"],
+.phone-screen #lobbySection .lobby-game-option[data-game="card-texas-holdem"],
 .host-screen:not(.in-game) .lobby-game-option[data-game="texas-holdem"],
 .phone-screen #lobbySection .lobby-game-option[data-game="texas-holdem"] { background: var(--game-holdem); }
 .host-screen:not(.in-game) .lobby-game-option:not([data-game="category"]),
@@ -1428,6 +1447,10 @@ body.in-game .mascot-duel-stage {
 .phone-screen #lobbySection .lobby-game-option .lobby-game-description { color: inherit; opacity: 0.82; font-weight: 600; }
 .host-screen:not(.in-game) .lobby-game-option .lobby-game-icon,
 .phone-screen #lobbySection .lobby-game-option .lobby-game-icon { background: var(--night); border: 0; box-shadow: none; text-shadow: none; }
+.host-screen:not(.in-game) .lobby-game-option[data-game="card-palace"] .lobby-game-icon::before,
+.host-screen:not(.in-game) .lobby-game-option[data-game="card-palace"] .lobby-game-icon::after,
+.phone-screen #lobbySection .lobby-game-option[data-game="card-palace"] .lobby-game-icon::before,
+.phone-screen #lobbySection .lobby-game-option[data-game="card-palace"] .lobby-game-icon::after,
 .host-screen:not(.in-game) .lobby-game-option[data-game="shithead"] .lobby-game-icon::before,
 .host-screen:not(.in-game) .lobby-game-option[data-game="shithead"] .lobby-game-icon::after,
 .phone-screen #lobbySection .lobby-game-option[data-game="shithead"] .lobby-game-icon::before,

@@ -30,7 +30,7 @@ describe('squeezing the card table to fit', () => {
 
 describe('Palace final standings on the phone', () => {
   const ctx = { state: { playerId: 'p2' } };
-  runInNewContext(fn(src('public/js/table-cards-phone.js'), 'tcName') + fn(src('games/shithead/client/phone.js'), 'shStandingsText'), ctx);
+  runInNewContext(fn(src('public/js/table-cards-phone.js'), 'tcName') + fn(src('games/card-palace/client/phone.js'), 'shStandingsText'), ctx);
   const msg = {
     playerNames: { p1: 'Anna', p2: 'Bo', p3: 'Cy' },
     players: [{ playerId: 'p1' }, { playerId: 'p2' }, { playerId: 'p3' }],

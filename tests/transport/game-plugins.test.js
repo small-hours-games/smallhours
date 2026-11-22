@@ -20,8 +20,11 @@ describe('loading game plugins', () => {
     await mkdir(join(process.cwd(), 'tmp'), { recursive: true });
     dir = await mkdtemp(join(process.cwd(), 'tmp', 'sh-games-'));
     await add('good', manifest('good', "icon: 'x', blurb: 'b'"));
+    await add('card-custom', "export default function defineGame(sdk) { return { id: 'card-custom', aliases: ['custom'], label: 'Custom', min: 1, max: 2, icon: '🃏', blurb: 'sdk:' + typeof sdk.cards.createDeck, actions: {}, setup() {}, view() {}, endIf() { return null; } }; }");
     await add('secret', manifest('secret', 'hidden: true'));
+    await add('dev-experiment', manifest('dev-experiment', "status: 'dev'"));
     await add('_template', manifest('_template'));
+    await add('_sdk', manifest('_sdk'));
     await add('wrong-folder', manifest('other'));
     await add('no-rules', "export default { id: 'no-rules', label: 'L', min: 1, max: 2, actions: {} };");
     await add('throws', "throw new Error('boom');");
@@ -29,28 +32,46 @@ describe('loading game plugins', () => {
   });
   afterAll(() => rm(dir, { recursive: true, force: true }));
 
-  it('loads valid games and leaves out broken ones without failing', async () => {
-    expect([...(await loadGames(dir)).keys()].sort()).toEqual(['good', 'secret']);
+  it('loads valid games (including defineGame(sdk) factories and category-prefixed folders) and leaves out broken ones', async () => {
+    const loaded = await loadGames(dir);
+    expect([...loaded.keys()].sort()).toEqual(['card-custom', 'dev-experiment', 'good', 'secret']);
+    expect(loaded.get('card-custom').category).toBe('card');
+    expect(loaded.get('card-custom').blurb).toBe('sdk:function');
   });
 
   it('survives a missing games folder', async () => {
     expect((await loadGames(join(dir, 'nope'))).size).toBe(0);
   });
 
-  it('never offers a hidden game', async () => {
+  it('never offers a hidden or dev-status game by default', async () => {
     const games = [...(await loadGames(dir)).values()];
-    expect(publicGames(games).map(g => g.type)).toEqual(['good']);
+    expect(publicGames(games).map(g => g.type).sort()).toEqual(['card-custom', 'good']);
   });
 });
 
 describe('the games in this repo', () => {
-  it('all load, with the four playable games first and in catalog order', () => {
-    expect(publicGames().map(g => g.type)).toEqual(['quiz', 'music-quiz', 'shithead', 'gin-rummy', 'sjuan', 'blackjack', 'texas-holdem', 'tilt-ball', 'tennis', 'runner']);
-    expect(listGames().map(g => g.id)).toEqual(expect.arrayContaining(['hilow', 'uno']));
+  it('all load, with playable games in catalog order and legacy aliases resolved', () => {
+    expect(publicGames().map(g => g.type)).toEqual([
+      'quiz',
+      'music-quiz',
+      'card-palace',
+      'card-gin-rummy',
+      'card-sjuan',
+      'card-blackjack',
+      'card-texas-holdem',
+      'tilt-ball',
+      'tennis',
+      'runner',
+    ]);
+    expect(listGames().map(g => g.id)).toEqual(expect.arrayContaining(['card-hilow', 'card-uno', 'sensor-lab']));
+    expect(getGame('shithead')?.id).toBe('card-palace');
+    expect(getGame('gin-rummy')?.id).toBe('card-gin-rummy');
+    expect(getGame('quiz-trivia')?.id).toBe('quiz');
+    expect(getGame('quiz-music')?.id).toBe('music-quiz');
   });
 
   it('keep a private key from a manifest away from the TV', () => {
-    const game = { state: {}, definition: { ...getGame('hilow'), view: () => ({ isActive: true, round: 1 }) } };
+    const game = { state: {}, definition: { ...getGame('card-hilow'), view: () => ({ isActive: true, round: 1 }) } };
     expect(getHostView(game, 'p1')).toEqual({ round: 1 });
   });
 });
@@ -68,7 +89,18 @@ describe('game routes', () => {
 
   it('lists only the games people can pick', async () => {
     const { games } = await (await fetch(base + '/api/games')).json();
-    expect(games.map(g => g.type)).toEqual(['quiz', 'music-quiz', 'shithead', 'gin-rummy', 'sjuan', 'blackjack', 'texas-holdem', 'tilt-ball', 'tennis', 'runner']);
+    expect(games.map(g => g.type)).toEqual([
+      'quiz',
+      'music-quiz',
+      'card-palace',
+      'card-gin-rummy',
+      'card-sjuan',
+      'card-blackjack',
+      'card-texas-holdem',
+      'tilt-ball',
+      'tennis',
+      'runner',
+    ]);
   });
 
   it('writes the catalog into the phone and TV pages', async () => {
@@ -79,24 +111,28 @@ describe('game routes', () => {
     }
   });
 
-  it('writes each game into the pages and serves its client files', async () => {
+  it('writes each game into the pages and serves its client files via both canonical ID and alias', async () => {
     const phone = await (await fetch(base + '/player/ABCD')).text();
     const tv = await (await fetch(base + '/host/ABCD')).text();
-    expect(phone).toContain('<script src="/games/shithead/phone.js"></script>');
+    expect(phone).toContain('<script src="/games/card-palace/phone.js"></script>');
     expect(phone).toContain('id="shitheadSection"');
-    expect(tv).toContain('<script src="/games/shithead/tv.js"></script>');
+    expect(tv).toContain('<script src="/games/card-palace/tv.js"></script>');
     expect(tv).not.toContain('id="shitheadSection"');
     expect(phone).not.toContain('<!-- game-');
-    const res = await fetch(base + '/games/shithead/tv.js');
-    expect(await res.text()).toContain("SH.registerGame('shithead'");
+    const resCanonical = await fetch(base + '/games/card-palace/tv.js');
+    expect(await resCanonical.text()).toContain("SH.registerGame('shithead'");
+    const resAlias = await fetch(base + '/games/shithead/tv.js');
+    expect(await resAlias.text()).toContain("SH.registerGame('shithead'");
   });
 
   it('does not write a hidden game into the pages', async () => {
-    expect(await (await fetch(base + '/player/ABCD')).text()).not.toContain('/games/uno/');
+    const html = await (await fetch(base + '/player/ABCD')).text();
+    expect(html).not.toContain('/games/card-uno/');
+    expect(html).not.toContain('/games/uno/');
   });
 
   it('does not serve the rules of a game', async () => {
-    const res = await fetch(base + '/games/shithead/rules.js');
+    const res = await fetch(base + '/games/card-palace/rules.js');
     expect(await res.text()).not.toContain('swapCard');
   });
 });

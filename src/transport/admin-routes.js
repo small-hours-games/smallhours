@@ -29,8 +29,9 @@ import {
   listGames,
   bumpCatalogVersion,
 } from '../games/registry.js';
-import { isGameVisibleInLobby, setGameLobbyVisibility } from '../games/visibility.js';
-import { parsePotConfig, makePotRoom, potAdminState, POT_GAMES } from '../pot/pot-room.js';
+import { isGameVisibleInLobby, isGameDefaultHidden, setGameLobbyVisibility } from '../games/visibility.js';
+import { resolveGamesDirs } from '../games/paths.js';
+import { parsePotConfig, makePotRoom, potAdminState, getPotGames } from '../pot/pot-room.js';
 import { mountPotActions } from './pot-routes.js';
 import { rateLimit } from './rate-limit.js';
 import { getPotStore } from '../pot/store.js';
@@ -302,20 +303,24 @@ export function setupAdminRoutes(app, manager = defaultManager, { lobbyMusicStor
       id: g.id,
       label: g.label,
       icon: g.icon,
+      category: g.category || 'party',
+      folder: g.folder || g.id,
+      aliases: g.aliases || [],
+      status: g.status || (g.category === 'dev' ? 'dev' : g.hidden ? 'no-ui' : 'ready'),
       min: g.min,
       max: g.max,
       builtIn: true,
-      defaultHidden: Boolean(g.hidden),
+      defaultHidden: isGameDefaultHidden(g),
       visibleInLobby: isGameVisibleInLobby(g),
     }));
-    res.json({ custom, builtIn });
+    res.json({ custom, builtIn, gamesDirs: resolveGamesDirs() });
   });
 
   app.patch('/admin/api/lobby-visibility/:id', requireAdminSession, express.json(), async (req, res) => {
     const game = getGame(req.params.id);
     if (!game) return res.status(404).json({ error: 'Game not found' });
     const visible = req.body?.visible === null ? null : Boolean(req.body?.visible);
-    await setGameLobbyVisibility(game.id, visible);
+    await setGameLobbyVisibility(game.id, visible, undefined, { aliases: game.aliases || [] });
     bumpCatalogVersion();
     res.json({ id: game.id, visibleInLobby: isGameVisibleInLobby(game) });
   });
@@ -358,7 +363,7 @@ export function setupAdminRoutes(app, manager = defaultManager, { lobbyMusicStor
       res.json({
         rooms,
         history: getPotStore().listPots(20),
-        defaults: { payee: process.env.POT_SWISH_NUMBER || '', bankPct: DEFAULT_BANK_PCT, games: POT_GAMES, minPlayers: MIN_POT_PLAYERS },
+        defaults: { payee: process.env.POT_SWISH_NUMBER || '', bankPct: DEFAULT_BANK_PCT, games: getPotGames(), minPlayers: MIN_POT_PLAYERS },
       });
     } catch (err) {
       res.status(500).json({ error: `Pot store: ${err.message}` });

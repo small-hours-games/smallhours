@@ -102,8 +102,17 @@ async function loadGames() {
   const visList = document.getElementById('lobbyVisibilityList');
   if (visList) {
     const all = [
-      ...(builtIn || []).map(g => ({ ...g, typeLabel: g.defaultHidden ? 'Built-in · no UI' : 'Built-in' })),
-      ...(custom || []).filter(g => g.enabled).map(g => ({ ...g, typeLabel: 'Custom · ' + g.kind })),
+      ...(builtIn || []).map(g => {
+        const cat = g.category ? g.category.toUpperCase() : 'GAME';
+        const folderHint = g.folder && g.folder !== g.id ? ` (${g.folder})` : '';
+        const statusHint = g.status === 'dev'
+          ? ' · Dev guardrail'
+          : g.defaultHidden
+            ? ' · Hidden by default'
+            : '';
+        return { ...g, typeLabel: `${cat}${folderHint}${statusHint}` };
+      }),
+      ...(custom || []).filter(g => g.enabled).map(g => ({ ...g, typeLabel: 'CUSTOM · ' + g.kind })),
     ];
     visList.innerHTML = all.map(g => `
       <div class="rounded-xl p-3 flex items-center justify-between gap-2 border transition ${g.visibleInLobby ? 'bg-slate-800/80 border-emerald-500/40' : 'bg-slate-950/60 border-slate-800 opacity-55'}">

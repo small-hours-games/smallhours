@@ -1,8 +1,8 @@
 // Small Hours - Custom Quiz Game Adapter
-// Wraps games/quiz/rules.js so API-created quiz games run directly on the
-// built-in Quiz engine, Phone/TV UI, and optional Gemini TTS narration.
+// Wraps src/games/quiz-engine.js so API-created quiz games run directly on the
+// shared Quiz engine, Phone/TV UI, and optional Gemini TTS narration.
 
-import quizRules, { PHASE_DURATIONS } from '../../games/quiz/rules.js';
+import quizRules, { PHASE_DURATIONS } from './quiz-engine.js';
 import { warmQuizNarration } from '../fetcher/cached-narration.js';
 
 export function validateQuizSpec(raw) {

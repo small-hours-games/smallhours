@@ -1,7 +1,7 @@
 // The AI seats are characters: their own name and face, and their own way of playing.
 import { describe, it, expect } from 'vitest';
 import { AI_PERSONAS, personaFor, publicPersonas } from '../../src/engine/bots/personas.js';
-import { choosePalaceAction } from '../../games/shithead/bot.js';
+import { choosePalaceAction } from '../../games/card-palace/bot.js';
 import { Room, AVATAR_POOL } from '../../src/session/room.js';
 
 const card = (rank, suit, id) => ({ rank, suit, id });

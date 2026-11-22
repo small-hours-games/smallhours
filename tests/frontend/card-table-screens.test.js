@@ -5,15 +5,15 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { createTestGame, act, viewFor } from '../engine/game-harness.js';
 import { getHostView } from '../../src/transport/host-view.js';
-import ginRummy from '../../games/gin-rummy/rules.js';
-import shithead from '../../games/shithead/rules.js';
+import ginRummy from '../../games/card-gin-rummy/rules.js';
+import shithead from '../../games/card-palace/rules.js';
 
 const read = file => readFileSync(new URL('../../public/' + file, import.meta.url), 'utf8');
 const KIT = read('js/table-cards.js');
 const game = file => readFileSync(new URL('../../games/' + file, import.meta.url), 'utf8');
-const PLAYER = read('js/table-cards-phone.js') + game('shithead/client/phone.js') + game('gin-rummy/client/phone.js');
+const PLAYER = read('js/table-cards-phone.js') + game('card-palace/client/phone.js') + game('card-gin-rummy/client/phone.js');
 const TV_KIT = read('js/table-cards-tv.js');
-const TV_GAMES = game('shithead/client/tv.js') + '\n' + game('gin-rummy/client/tv.js');
+const TV_GAMES = game('card-palace/client/tv.js') + '\n' + game('card-gin-rummy/client/tv.js');
 
 function fn(source, name) {
   const start = source.indexOf('    function ' + name + '(');

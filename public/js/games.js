@@ -2,7 +2,8 @@
 // (SH_GAMES) into the page, from the manifests in games/.
 
 function shGame(type) {
-  return SH_GAMES.find(g => g.type === type) || { type: type, label: type, icon: '🎮', min: 1, max: 99, hasUi: false };
+  return SH_GAMES.find(g => g.type === type || (Array.isArray(g.aliases) && g.aliases.includes(type)))
+    || { type: type, label: type, icon: '🎮', min: 1, max: 99, hasUi: false };
 }
 
 // Emoji for an OpenTrivia category name (featured: Music, Geography).

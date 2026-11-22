@@ -800,7 +800,7 @@ describe('ws-adapter - AI opponents for a lone player', () => {
     vi.useFakeTimers();
     env = makeEnv();
     const ws = connectPlayer(env, 'Alice');
-    expect(env.room.availableGames().find(g => g.type === 'shithead')?.vsAi).toBe(true);
+    expect(env.room.availableGames().find(g => g.type === 'card-palace')?.vsAi).toBe(true);
     ws.emit('message', JSON.stringify({ type: 'START_MINI_GAME', gameType: 'shithead', config: { bots: 9 } }));
     await vi.waitFor(() => expect(env.room.game).not.toBeNull());
     expect(env.room.bots.map(b => b.playerId)).toEqual(['bot_1', 'bot_2', 'bot_3', 'bot_4']);

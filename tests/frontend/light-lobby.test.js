@@ -13,7 +13,7 @@ describe('Light lobby uses the multiplayer state', () => {
   it('renders phone votes with real selection, counts and player limits', () => {
     const context = {
       state: { playerId: 'p1', gameSuggestions: { p1: 'quiz', p2: 'quiz' }, leadingGame: 'quiz' },
-      gameBlocker: game => game.type === 'shithead' ? '2+ players' : null,
+      gameBlocker: game => game.type === 'card-palace' ? '2+ players' : null,
       gameBlurb: game => game.blurb,
       escapeHtml,
     };
@@ -26,16 +26,18 @@ describe('Light lobby uses the multiplayer state', () => {
     expect(list.innerHTML).toContain('data-game="quiz" aria-pressed="true"');
     expect(list.innerHTML).toContain('lobby-vote-count">2</span>');
     expect(list.innerHTML).toContain('onclick="suggestGame(this.dataset.game)"');
-    expect(list.innerHTML).toContain('data-game="shithead" aria-pressed="false" disabled');
+    expect(list.innerHTML).toContain('data-game="card-palace" aria-pressed="false" disabled');
     expect(list.innerHTML).toContain('2+ players');
   });
-  it('lets a lone player pick the card games against AI, and only then', () => {
+  it('lets a lone player pick the card games against AI, and only then (resolving both card-* IDs and legacy aliases)', () => {
     const context = { state: { players: [{ playerId: 'p1', connected: true }] } };
     loadCatalog(context);
     const source = read('player.html');
     runInNewContext(source.slice(source.indexOf('    function connectedCount('), source.indexOf('    function renderLobby(')), context);
-    const gin = context.shGame('gin-rummy');
-    const palace = context.shGame('shithead');
+    const gin = context.shGame('card-gin-rummy');
+    const palace = context.shGame('card-palace');
+    expect(context.shGame('gin-rummy')).toBe(gin);
+    expect(context.shGame('shithead')).toBe(palace);
     expect(context.gameBlocker(gin)).toBeNull();
     expect(context.gameBlurb(palace)).toMatch(/Solo vs AI/);
     context.state.players.push({ playerId: 'p2', connected: true }, { playerId: 'p3', connected: true });

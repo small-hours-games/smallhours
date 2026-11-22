@@ -10,10 +10,14 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { computePayouts, normalizeSwishNumber, normalizePayeeNumber, formatSwishNumber, MIN_POT_PLAYERS, DEFAULT_BANK_PCT } from './payout.js';
 import { getPotStore } from './store.js';
 import { prefilledLink, paymentRequestLink } from './swish.js';
+import { potGameIds, resolveGameId } from '../games/registry.js';
 
 const S = store => store || getPotStore();
 
 export const POT_GAMES = ['quiz', 'music-quiz'];
+export function getPotGames() {
+  return potGameIds();
+}
 export const MAX_STAKE = 500;
 
 function connectedIds(room) {
@@ -33,8 +37,10 @@ export function parsePotConfig(body = {}, { host = false } = {}) {
   const bankPct = hostBank ? hostBank.bankPct
     : (body.bankPct === undefined || body.bankPct === '' ? DEFAULT_BANK_PCT : Number(body.bankPct));
   if (!Number.isFinite(bankPct) || bankPct < 0 || bankPct > 5) return { ok: false, error: 'Bank share must be 0–5 %' };
-  const gameType = String(body.gameType || 'quiz');
-  if (!POT_GAMES.includes(gameType)) return { ok: false, error: 'Pot rooms play Quiz or Music Quiz' };
+  const allowedGames = getPotGames();
+  const rawType = String(body.gameType || allowedGames[0] || 'quiz');
+  const gameType = resolveGameId(rawType) || rawType;
+  if (!allowedGames.includes(gameType) && !POT_GAMES.includes(gameType)) return { ok: false, error: 'Pot rooms play Quiz or Music Quiz' };
   // With Swish Handel the admin's rooms are paid to the Handel number. A host's room is
   // always paid to the host's own number.
   const raw = !host && process.env.SWISH_CERT_PATH && process.env.SWISH_PAYEE

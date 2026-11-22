@@ -10,9 +10,25 @@
 //        alwaysScoreboard (show it even before the game has scores).
 var SH_PLUGINS = {};
 var SH = {
-  registerGame: function (id, plugin) { SH_PLUGINS[id] = plugin; },
+  registerGame: function (id, plugin) {
+    SH_PLUGINS[id] = plugin;
+    if (typeof SH_DYNAMIC_ALIASES !== 'undefined' && Array.isArray(SH_DYNAMIC_ALIASES)) {
+      SH_DYNAMIC_ALIASES.forEach(function (a) {
+        if (a && a.base === id && a.id && !SH_PLUGINS[a.id]) SH_PLUGINS[a.id] = plugin;
+      });
+    }
+  },
   aliasGame: function (id, baseId) { if (SH_PLUGINS[baseId]) SH_PLUGINS[id] = SH_PLUGINS[baseId]; },
-  game: function (id) { return SH_PLUGINS[id] || null; },
+  game: function (id) {
+    if (SH_PLUGINS[id]) return SH_PLUGINS[id];
+    if (typeof SH_DYNAMIC_ALIASES !== 'undefined' && Array.isArray(SH_DYNAMIC_ALIASES)) {
+      for (var i = 0; i < SH_DYNAMIC_ALIASES.length; i++) {
+        var a = SH_DYNAMIC_ALIASES[i];
+        if (a && a.id === id && SH_PLUGINS[a.base]) return SH_PLUGINS[a.base];
+      }
+    }
+    return null;
+  },
   eachGame: function (fn) { Object.keys(SH_PLUGINS).forEach(function (id) { fn(SH_PLUGINS[id], id); }); },
   // Set by the TV page: lower the game music while a voice speaks.
   duckMusic: function () {},

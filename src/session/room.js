@@ -3,7 +3,7 @@
 
 import { createGame, processAction, getView, checkEnd } from '../engine/engine.js';
 import { AI_PERSONAS } from '../engine/bots/personas.js';
-import { getGame, listGames } from '../games/registry.js';
+import { getGame, listGames, resolveGameId } from '../games/registry.js';
 import { isGameVisibleInLobby } from '../games/visibility.js';
 import { randomBytes } from 'node:crypto';
 import { potPublicState, forgetPotPlayer, abortPotGame } from '../pot/pot-room.js';
@@ -274,7 +274,7 @@ export class Room {
    * Returns null if no compatible game has been suggested.
    */
   resolveWinningGame() {
-    const compatible = new Set(this.availableGames().map(g => g.type));
+    const compatible = new Set(this.availableGames().flatMap(g => [g.type, ...(g.aliases || [])]));
     const tallies = new Map();
     for (const gameType of this.gameSuggestions.values()) {
       if (!compatible.has(gameType)) continue;
@@ -339,6 +339,7 @@ export class Room {
       .filter(g => (this.pot || isGameVisibleInLobby(g)) && ((count >= g.min && count <= g.max) || (count === 1 && g.ai)))
       .map(g => ({
         type: g.id, label: g.label, minPlayers: g.min, maxPlayers: g.max,
+        ...(Array.isArray(g.aliases) && g.aliases.length ? { aliases: g.aliases } : {}),
         ...(count === 1 && g.ai && count < g.min ? { vsAi: true } : {}),
       }));
   }
@@ -408,6 +409,7 @@ export class Room {
   async startGame(gameType, config = {}) {
     const entry = getGame(gameType);
     if (!entry) throw new Error(`Unknown game type: ${gameType}`);
+    const canonicalType = entry.id;
     const connectedCount = [...this.players.values()].filter(p => p.connected).length;
     const botCount = this.aiSeatCount(entry, connectedCount, config);
     if (connectedCount + botCount < entry.min) throw new Error(`${entry.label} requires at least ${entry.min} players`);

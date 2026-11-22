@@ -1,5 +1,11 @@
 // A complete, small card game to copy: match the top card by suit or rank, first out wins.
-import { createDeck, deal } from '../../src/cards/deck.js';
+import { createDeck as defaultCreateDeck, deal as defaultDeal } from '../_sdk/index.js';
+let createDeck = defaultCreateDeck;
+let deal = defaultDeal;
+export function configureRules(cards = {}) {
+  if (cards.createDeck) createDeck = cards.createDeck;
+  if (cards.deal) deal = cards.deal;
+}
 
 const nextPlayer = state => state.players[(state.players.indexOf(state.turn) + 1) % state.players.length];
 const notYourTurn = { type: 'error', message: 'Not your turn' };

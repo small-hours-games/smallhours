@@ -727,8 +727,9 @@
       const lbl = document.getElementById('roundCountdownLabel');
       const num = document.getElementById('roundCountdownNum');
       if (!ov || !lbl || !num) return;
-      const unit = gameType === 'gin-rummy' ? 'Hand ' : 'Round ';
-      lbl.textContent = (round && round > 1 ? unit + round : shGame(gameType).label) + ' — Get Ready';
+      const info = shGame(gameType);
+      const unit = (info.roundUnit || (gameType === 'gin-rummy' || gameType === 'card-gin-rummy' ? 'Hand' : 'Round')) + ' ';
+      lbl.textContent = (round && round > 1 ? unit + round : info.label) + ' — Get Ready';
       let left = Math.max(1, Number(seconds) || 3);
       const show = (val, go) => {
         num.classList.remove('rc-go');

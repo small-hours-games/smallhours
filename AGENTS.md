@@ -39,8 +39,8 @@ Before editing, inspect `git status` and the relevant diff. Preserve existing un
 | `src/session/manager.js` | Room creation, lookup, and cleanup |
 | `src/session/room.js` | Players, reconnect identity, admin, lobby, scores, game registry and startup |
 | `src/engine/engine.js` | `createGame`, `processAction`, `getView`, `checkEnd` |
-| `games/<id>/` | One game each: `index.js` manifest, `rules.js`, optional `bot.js`, tests, and `client/` (`phone.js`, `tv.js`, `phone.html`, `style.css`, `lib/`) |
-| `src/games/registry.js`, `client.js` | Find and validate the games; write their scripts, styles and phone section into the pages |
+| `games/<category>-<name>/` | Standalone game repo structure (`card-*`, `quiz-*`, `arcade-*`, `dev-*`, plus `_sdk/` and `_template/`): `index.js` (`defineGame(sdk)`), `rules.js`, optional `bot.js`, tests, and `client/` (`phone.js`, `tv.js`, `phone.html`, `style.css`, `lib/`) |
+| `src/games/registry.js`, `client.js`, `sdk.js`, `paths.js`, `visibility.js` | Discover and validate games from `GAMES_DIR` (or `./games`), inject the platform SDK (`src/games/sdk.js`), enforce `/admin` lobby visibility guardrails, and mount their scripts, styles, and phone sections into the pages |
 | `public/js/game-api.js` | The contract between the pages and a game's client code |
 | `src/fetcher/` | Trivia, disk caches, Gemini TTS narration, Deezer/music playlists |
 | `src/notifications/discord.js` | Room-created webhook |
@@ -82,12 +82,12 @@ export default {
 
 ## Adding or changing a game
 
-See `games/README.md`.
+See `games/README.md` and `games/AGENTS.md`.
 
-1. Make a folder `games/<id>/`, implement the rules there, and cover legal moves, invalid moves, private views, and end conditions as appropriate.
-2. Export the manifest from `games/<id>/index.js` (see the other games). The server finds it by itself; `hidden: true` keeps a game without screens out of the lobby.
+1. Make a category-prefixed folder `games/<category>-<name>/` (e.g. `games/card-mygame/`), implement the rules using `../_sdk/index.js` (never import from `../../src/` or `../../tests/`), and cover legal moves, invalid moves, private views, and end conditions.
+2. Export `export default function defineGame(sdk) { ... }` from `games/<folder>/index.js`. The server discovers games from `GAMES_DIR` (comma-separated paths if multiple) or `./games`; `hidden: true`, `status: 'dev'`, `dev-*` folders, or `GAMES_DEFAULT_HIDDEN=1` keep in-development games out of the TV lobby until enabled in `/admin`.
 3. Add `client/phone.js`, `client/tv.js` and `client/phone.html` and call `SH.registerGame` (see `public/js/game-api.js`). Do not edit the shell pages for one game. Both screens need usable states and controls.
-4. If the game needs fetched content, prepare it in the session/transport flow. Phase timers go in the manifest as `phases`; see the quiz.
+4. If the game needs fetched content, use `sdk.content` or prepare it in the session/transport flow. Phase timers go in the manifest as `phases`; see `games/quiz-trivia/`.
 5. Check lobby selection, start, actions, scoring, end, and return to lobby. Update affected integration tests.
 
 ## Frontend conventions

@@ -5,7 +5,7 @@
 
 import express from 'express';
 import {
-  parsePotConfig, makePotRoom, setPotPaid, setPaidOut, newPotRound, setBankPaid, potAdminState, isPotHost, hostBankTerms,
+  parsePotConfig, makePotRoom, setPotPaid, setPaidOut, newPotRound, setBankPaid, potAdminState, isPotHost, hostBankTerms, getPotGames,
 } from '../pot/pot-room.js';
 import { notifyRoomCreated } from '../notifications/discord.js';
 import { rateLimit, clientIp } from './rate-limit.js';
@@ -74,7 +74,7 @@ export function setupPotRoutes(app, manager) {
   // What the landing page tells a host before they open a room.
   app.get('/api/pots-terms', (_req, res) => {
     const { bankPct } = hostBankTerms();
-    res.json({ bankPct, minPlayers: 4, maxStake: 500, games: ['quiz', 'music-quiz'] });
+    res.json({ bankPct, minPlayers: 4, maxStake: 500, games: getPotGames() });
   });
 
   // A host opens a pot room from the landing page.

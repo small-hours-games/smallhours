@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { createTestGame, viewFor } from '../engine/game-harness.js';
 import { getHostView, isPrivateViewKey } from '../../src/transport/host-view.js';
-import ginRummy from '../../games/gin-rummy/index.js';
-import shithead from '../../games/shithead/index.js';
-import uno from '../../games/uno/index.js';
-import quiz from '../../games/quiz/index.js';
+import { getGame } from '../../src/games/registry.js';
+const ginRummy = getGame('card-gin-rummy');
+const shithead = getGame('card-palace');
+const uno = getGame('card-uno');
+const quiz = getGame('quiz');
 
 function expectNoPrivateKeys(view, game) {
   const leaked = Object.keys(view).filter(key => isPrivateViewKey(key, game.definition.privateKeys));

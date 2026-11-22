@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 
 function loadRenderer(file, name, next, context) {
-  const source = readFileSync(new URL('../../games/quiz/client/' + file, import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../../games/quiz-trivia/client/' + file, import.meta.url), 'utf8');
   const start = source.indexOf('    function ' + name + '(');
   const end = source.indexOf(next.startsWith(' ') ? next : '    function ' + next + '(', start);
   runInNewContext(source.slice(start, end), context);

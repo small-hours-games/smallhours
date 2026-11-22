@@ -46,6 +46,38 @@ describe('Lobby game visibility overrides', () => {
     expect(room.availableGames().some(g => g.type === 'sensor-lab')).toBe(true);
   });
 
+  it('applies admin guardrail for dev-* / status:dev / GAMES_DEFAULT_HIDDEN and honors legacy alias keys in lobby-visibility.json', async () => {
+    // Saved override under legacy ID ('shithead') applies to renamed game ('card-palace' with alias 'shithead')
+    resetVisibilityCacheForTest({ shithead: false });
+    expect(publicGames().some(g => g.type === 'card-palace')).toBe(false);
+
+    // Updating via canonical ID clears old alias keys
+    await setGameLobbyVisibility('card-palace', true, visFile, ['shithead', 'palace']);
+    expect(publicGames().some(g => g.type === 'card-palace')).toBe(true);
+    const saved = JSON.parse(await fs.readFile(visFile, 'utf8'));
+    expect(saved.overrides['card-palace']).toBe(true);
+    expect(saved.overrides.shithead).toBeUndefined();
+
+    // dev-status or dev-* folder games default to hidden unless explicitly enabled in /admin
+    const devGame = { id: 'dev-prototype', folder: 'dev-prototype', status: 'dev' };
+    expect(isGameVisibleInLobby(devGame)).toBe(false);
+    await setGameLobbyVisibility('dev-prototype', true, visFile);
+    expect(isGameVisibleInLobby(devGame)).toBe(true);
+
+    // GAMES_DEFAULT_HIDDEN=1 hides any unapproved game until explicitly enabled in /admin
+    const prevEnv = process.env.GAMES_DEFAULT_HIDDEN;
+    process.env.GAMES_DEFAULT_HIDDEN = '1';
+    try {
+      resetVisibilityCacheForTest({});
+      expect(isGameVisibleInLobby({ id: 'card-new', hidden: false })).toBe(false);
+      resetVisibilityCacheForTest({ 'card-new': true });
+      expect(isGameVisibleInLobby({ id: 'card-new', hidden: false })).toBe(true);
+    } finally {
+      if (prevEnv === undefined) delete process.env.GAMES_DEFAULT_HIDDEN;
+      else process.env.GAMES_DEFAULT_HIDDEN = prevEnv;
+    }
+  });
+
   it('exposes PATCH /admin/api/lobby-visibility/:id behind admin session auth', async () => {
     const app = express();
     setupAdminRoutes(app);

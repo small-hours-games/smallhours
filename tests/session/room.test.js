@@ -373,13 +373,13 @@ describe('Room - startGame (registry)', () => {
     expect(room.gameSuggestions.size).toBe(0);
   });
 
-  it('offers gin-rummy only to exactly 2 connected players, matching its engine setup', async () => {
+  it('offers card-gin-rummy only to exactly 2 connected players, matching its engine setup', async () => {
     const room = new Room('TEST');
     room.addPlayer('Alice');
     room.addPlayer('Bob');
-    expect(room.availableGames().map(g => g.type)).toContain('gin-rummy');
+    expect(room.availableGames().map(g => g.type)).toContain('card-gin-rummy');
     room.addPlayer('Carol');
-    expect(room.availableGames().map(g => g.type)).not.toContain('gin-rummy');
+    expect(room.availableGames().map(g => g.type)).not.toContain('card-gin-rummy');
     await expect(room.startGame('gin-rummy', {})).rejects.toThrow(/supports at most 2 players/);
   });
 
@@ -387,8 +387,8 @@ describe('Room - startGame (registry)', () => {
     const room = new Room('TEST');
     room.addPlayer('Alice');
     const solo = Object.fromEntries(room.availableGames().map(g => [g.type, g]));
-    expect(solo['gin-rummy'].vsAi).toBe(true);
-    expect(solo.shithead.vsAi).toBe(true);
+    expect(solo['card-gin-rummy'].vsAi).toBe(true);
+    expect(solo['card-palace'].vsAi).toBe(true);
     expect(solo.quiz.vsAi).toBeUndefined();
     expect(solo.spy).toBeUndefined();
 
@@ -405,7 +405,7 @@ describe('Room - startGame (registry)', () => {
     room.endGame();
 
     room.addPlayer('Bob');
-    expect(room.availableGames().find(g => g.type === 'shithead').vsAi).toBeUndefined();
+    expect(room.availableGames().find(g => g.type === 'card-palace').vsAi).toBeUndefined();
     await room.startGame('shithead', { bots: 3 });
     expect(room.bots).toEqual([]);
   });

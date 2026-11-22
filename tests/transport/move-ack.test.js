@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import { createGame } from '../../src/engine/engine.js';
 import { handleGameAction } from '../../src/transport/handlers/game.js';
-import shithead from '../../games/shithead/rules.js';
+import shithead from '../../games/card-palace/rules.js';
 
 function setup() {
   const room = {

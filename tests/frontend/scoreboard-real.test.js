@@ -26,14 +26,14 @@ describe('TV scoreboard', () => {
   });
 
   it('Palace ranks who went out first and counts the cards of the others', () => {
-    const { entries } = scoreboard('shithead', 'games/shithead/client/tv.js')({
+    const { entries } = scoreboard('shithead', 'games/card-palace/client/tv.js')({
       scores: { a: 0, b: 1 }, finishOrder: ['b'], players: [{ playerId: 'a', handCount: 2, faceUp: [{}], faceDownCount: 0 }],
     });
     expect(entries.map(e => [e.id, e.valueText, e.isOut])).toEqual([['b', 'Place 1', true], ['a', '3 cards', false]]);
   });
 
   it('Gin Rummy labels the hand and the quiz labels the question', () => {
-    expect(scoreboard('gin-rummy', 'games/gin-rummy/client/tv.js')({ scores: {}, handNumber: 2 }).roundLabel).toBe('Hand 2');
+    expect(scoreboard('gin-rummy', 'games/card-gin-rummy/client/tv.js')({ scores: {}, handNumber: 2 }).roundLabel).toBe('Hand 2');
   });
 });
 

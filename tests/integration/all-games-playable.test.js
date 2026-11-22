@@ -1,24 +1,24 @@
 import { describe, it, expect } from 'vitest';
 import { Room } from '../../src/session/room.js';
 import { createGame, processAction, checkEnd } from '../../src/engine/engine.js';
-import hilow from '../../games/hilow/rules.js';
+import hilow from '../../games/card-hilow/rules.js';
 
-const ALL_GAMES = ['quiz', 'shithead', 'gin-rummy', 'hilow', 'sjuan', 'uno'];
+const ALL_GAMES = ['quiz', 'card-palace', 'card-gin-rummy', 'card-hilow', 'card-sjuan', 'card-uno', 'shithead', 'gin-rummy'];
 
 describe('all games are registered and startable', () => {
   it('offers only games with screens', () => {
     const r = new Room('T1');
     r.addPlayer('A'); r.addPlayer('B'); r.addPlayer('C');
     const avail = r.availableGames().map(g => g.type);
-    expect(avail).toContain('shithead');
-    expect(avail).not.toContain('hilow');
+    expect(avail).toContain('card-palace');
+    expect(avail).not.toContain('card-hilow');
   });
 
-  it('every game type can be instantiated via the engine', async () => {
+  it('every game type can be instantiated via the engine (including legacy aliases)', async () => {
     for (const type of ALL_GAMES) {
       const r = new Room('R_' + type);
       // gin-rummy needs exactly 2; others fine with 2-3.
-      const players = type === 'gin-rummy' ? ['A', 'B'] : ['A', 'B', 'C'];
+      const players = (type === 'gin-rummy' || type === 'card-gin-rummy') ? ['A', 'B'] : ['A', 'B', 'C'];
       for (const p of players) r.addPlayer(p);
       const game = await r.startGame(type, {});
       expect(game, `game ${type} should start`).not.toBeNull();

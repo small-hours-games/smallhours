@@ -1,6 +1,7 @@
 // Small Hours - Game message handlers
 
 import { processAction, getView, checkEnd } from '../../engine/engine.js';
+import { getGame } from '../../games/registry.js';
 import { handleStartCategoryVote } from './vote.js';
 import { getHostView } from '../host-view.js';
 import { computeSessionPoints } from '../../session/scoring.js';
@@ -42,7 +43,7 @@ export async function handleStartVotedGame(ws, meta, room, msg, ctx) {
     return;
   }
 
-  if (gameType === 'quiz' && !room.votingActive) {
+  if (getGame(gameType)?.categoryVote && !room.votingActive) {
     await handleStartCategoryVote(ws, meta, room, msg, ctx);
     return;
   }
@@ -90,8 +91,8 @@ export async function handleStartMiniGame(ws, meta, room, msg, ctx) {
 
   let config = msg.config || {};
 
-  // Quiz: resolve winning category from votes if no explicit override (per D-12, D-16)
-  if (msg.gameType === 'quiz' && room.votingActive && !config.categoryId) {
+  // Category-vote games (Quiz): resolve winning category from votes if no explicit override (per D-12, D-16)
+  if (getGame(msg.gameType)?.categoryVote && room.votingActive && !config.categoryId) {
     config = { ...config, categoryId: room.resolveWinningCategory() };
   }
 

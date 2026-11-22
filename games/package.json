@@ -1,0 +1,17 @@
+{
+  "name": "@small-hours-games/games",
+  "version": "1.0.0",
+  "description": "Standalone game plugins repository for the Small Hours party game platform.",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "find . -maxdepth 3 -name '*.js' -not -path './node_modules/*' -exec node --check {} +"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.12"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

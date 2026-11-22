@@ -1,0 +1,25 @@
+    <div class="section tc-screen" id="sjuanSection">
+      <div class="tc-topbar">
+        <div class="tc-status" id="sjStatus"><span class="tc-dot" id="sjStatusDot"></span><span id="sjStatusText"></span></div>
+        <span class="tc-pill tc-mono" id="sjDeckPill"></span>
+      </div>
+      <div class="tc-table tc-felt">
+        <div class="sj-board" id="sjBoard"></div>
+        <div class="sj-deck" id="sjDeck"></div>
+      </div>
+      <div class="tc-chips" id="sjOthers"></div>
+      <div class="tc-hand-zone">
+        <div class="tc-hud-row">
+          <span class="tc-pill tc-mono" id="sjPlayablePill">Playable: 0</span>
+        </div>
+        <div class="tc-hand-area" id="sjHand"></div>
+        <div class="tc-actionbar" id="sjActionBar">
+          <div>
+            <button type="button" class="tc-btn" id="sjSortBtn" onclick="sjCycleSort()">Sort: suit</button>
+            <button type="button" class="tc-btn" id="sjLayoutBtn" onclick="sjToggleLayout()">Fan</button>
+            <button type="button" class="tc-btn tc-btn-colours" id="sjColoursBtn" onclick="tcToggleFourColour()" aria-pressed="false" title="Four-colour suits"><span class="tc-dot-c">♣</span><span class="tc-dot-d">♦</span></button>
+          </div>
+        </div>
+        <button type="button" class="tc-cta tc-cta-big" id="sjCta" onclick="sjCtaAction()">Sjuan</button>
+      </div>
+    </div>

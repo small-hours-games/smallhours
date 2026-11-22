@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { handleSurrender, handleGameAction } from '../../src/transport/handlers/game.js';
-import shithead from '../../games/shithead/rules.js';
-import blackjack from '../../games/blackjack/rules.js';
+import shithead from '../../games/card-palace/rules.js';
+import blackjack from '../../games/card-blackjack/rules.js';
 import { createGame } from '../../src/engine/engine.js';
 
 function makeMockCtx() {

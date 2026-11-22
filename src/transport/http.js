@@ -8,8 +8,9 @@ import path from 'path';
 import fs from 'fs';
 import express from 'express';
 import { notifyRoomCreated } from '../notifications/discord.js';
-import { gameStories, listGames, publicGames } from '../games/registry.js';
-import { GAMES_DIR, renderGamePage } from '../games/client.js';
+import { gameStories, getGame, publicGames } from '../games/registry.js';
+import { clientDirForGame, renderGamePage } from '../games/client.js';
+import { API_CARD_CLIENT_DIR } from '../games/paths.js';
 import { BUILD_INFO } from '../version.js';
 import { setupAdminRoutes } from './admin-routes.js';
 import { setupApiV1Routes } from './api-v1.js';
@@ -125,10 +126,16 @@ export function setupRoutes(app, manager, { lobbyMusicStore = defaultLobbyMusicS
   });
 
   // Only client/ is public: a game's rules stay on the server.
-  for (const game of listGames()) {
-    app.use('/games/' + game.id, express.static(path.join(GAMES_DIR, game.id, 'client'), { index: false }));
-  }
-  app.use('/games/_api-card', express.static(path.join(GAMES_DIR, '_api-card', 'client'), { index: false }));
+  // Resolve dynamically via getGame() so category-prefixed folders (e.g. card-palace/),
+  // aliases (e.g. /games/shithead/*), and external GAMES_DIR paths all work seamlessly.
+  app.use('/games/_api-card', express.static(API_CARD_CLIENT_DIR, { index: false }));
+  app.use('/games/:gameId', (req, res, next) => {
+    const game = getGame(req.params.gameId);
+    if (!game) return next();
+    const dir = clientDirForGame(game);
+    if (!dir) return next();
+    return express.static(dir, { index: false })(req, res, next);
+  });
 
   setupAdminRoutes(app, manager, { lobbyMusicStore });
   setupSwishRoutes(app, manager);
