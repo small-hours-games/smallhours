@@ -249,6 +249,13 @@ describe('createLobbyMusicStore', () => {
     const removed = await store.cleanupStaleUploads();
     expect(removed).toBe(1);
     expect(await fs.readdir(path.join(uploadsDir, '.uploads'))).toEqual([]);
+
+    // Non-Buffer chunk payloads are rejected with 400 (no type confusion)
+    const s3 = await store.startUpload({ filename: 'typed.ogg', size: 64 });
+    expect((await store.appendUploadChunk(s3.uploadId, 0, { not: 'a buffer' })).status).toBe(400);
+    expect((await store.appendUploadChunk(s3.uploadId, 0, 'raw-string')).status).toBe(400);
+    expect((await store.appendUploadChunk(s3.uploadId, 0, ['a', 'b'])).status).toBe(400);
+    await store.abortUpload(s3.uploadId);
   });
 
   it('keeps original MP3 when ffmpeg is unavailable and sets xingWarning accurately', async () => {

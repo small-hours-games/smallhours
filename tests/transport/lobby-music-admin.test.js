@@ -217,6 +217,22 @@ describe('Admin lobby music routes & live host WS sync', () => {
     });
     expect(badOffset.status).toBe(409);
 
+    // Empty X-Chunk-Offset header is rejected (not coerced to 0)
+    const emptyOffset = await fetch(`${baseUrl}/admin/api/lobby-music/uploads/${uploadId}`, {
+      method: 'PUT',
+      headers: { ...authHeaders, 'Content-Type': 'application/octet-stream', 'X-Chunk-Offset': '' },
+      body: audio.subarray(0, 10),
+    });
+    expect(emptyOffset.status).toBe(409);
+
+    // JSON object body sent to binary chunk route returns 400 (not 500)
+    const jsonChunk = await fetch(`${baseUrl}/admin/api/lobby-music/uploads/${uploadId}`, {
+      method: 'PUT',
+      headers: { ...authHeaders, 'Content-Type': 'application/json', 'X-Chunk-Offset': '0' },
+      body: JSON.stringify({ spoof: true }),
+    });
+    expect(jsonChunk.status).toBe(400);
+
     // Two valid chunks
     const c1 = await fetch(`${baseUrl}/admin/api/lobby-music/uploads/${uploadId}`, {
       method: 'PUT',

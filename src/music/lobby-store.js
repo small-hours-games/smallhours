@@ -374,6 +374,7 @@ export function createLobbyMusicStore({
     const uploadId = randomUUID();
     await fsp.mkdir(stagingDir, { recursive: true });
     const partPath = path.join(stagingDir, `${uploadId}.part`);
+    const xingPath = path.join(stagingDir, `${uploadId}.xing.mp3`);
     await fsp.writeFile(partPath, Buffer.alloc(0));
 
     sessions.set(uploadId, {
@@ -384,6 +385,7 @@ export function createLobbyMusicStore({
       receivedBytes: 0,
       position: pos,
       partPath,
+      xingPath,
       updatedAt: Date.now(),
     });
 
@@ -404,16 +406,21 @@ export function createLobbyMusicStore({
       };
     }
 
-    const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || []);
-    if (buf.length === 0) {
+    if (!Buffer.isBuffer(buffer) && !(buffer instanceof Uint8Array)) {
+      return { ok: false, status: 400, error: 'Binary audio chunk required' };
+    }
+    const chunk = Buffer.isBuffer(buffer)
+      ? buffer
+      : Buffer.from(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+    if (chunk.byteLength === 0) {
       return { ok: false, status: 400, error: 'Empty chunk' };
     }
-    if (session.receivedBytes + buf.length > session.declaredSize) {
+    if (session.receivedBytes + chunk.byteLength > session.declaredSize) {
       return { ok: false, status: 400, error: 'Chunk exceeds declared file size' };
     }
 
-    await fsp.appendFile(session.partPath, buf);
-    session.receivedBytes += buf.length;
+    await fsp.appendFile(session.partPath, chunk);
+    session.receivedBytes += chunk.byteLength;
     session.updatedAt = Date.now();
     return { ok: true, receivedBytes: session.receivedBytes };
   }
@@ -459,13 +466,16 @@ export function createLobbyMusicStore({
       let xingWarning = false;
 
       if (session.ext === '.mp3') {
-        xingTmpPath = path.join(stagingDir, `${uploadId}.xing.mp3`);
+        xingTmpPath = session.xingPath;
         try {
           await ffmpegRunner(partPath, xingTmpPath);
           const stat = await fsp.stat(xingTmpPath);
           if (stat.size > 0) {
             commitSource = xingTmpPath;
             xingNormalized = true;
+          } else {
+            await fsp.unlink(xingTmpPath).catch(() => {});
+            xingTmpPath = null;
           }
         } catch {
           await fsp.unlink(xingTmpPath).catch(() => {});

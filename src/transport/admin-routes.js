@@ -423,15 +423,24 @@ export function setupAdminRoutes(app, manager = defaultManager, { lobbyMusicStor
     }
   });
 
+  const UPLOAD_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
   app.put(
     '/admin/api/lobby-music/uploads/:uploadId',
     requireAdminSession,
     express.raw({ type: () => true, limit: '4mb' }),
     async (req, res) => {
       try {
+        const uploadId = String(req.params.uploadId || '');
+        if (!UPLOAD_ID_RE.test(uploadId)) {
+          return res.status(404).json({ error: 'Upload session not found or expired' });
+        }
+        if (!Buffer.isBuffer(req.body)) {
+          return res.status(400).json({ error: 'Binary audio chunk required' });
+        }
         const offsetHeader = req.get('X-Chunk-Offset');
-        const offset = offsetHeader === undefined ? NaN : Number(offsetHeader);
-        const result = await lobbyMusicStore.appendUploadChunk(req.params.uploadId, offset, req.body);
+        const offset = typeof offsetHeader === 'string' && offsetHeader.trim() !== '' ? Number(offsetHeader) : NaN;
+        const result = await lobbyMusicStore.appendUploadChunk(uploadId, offset, req.body);
         if (!result.ok) return res.status(result.status || 400).json({ error: result.error });
         res.json({ receivedBytes: result.receivedBytes });
       } catch (err) {
@@ -442,7 +451,11 @@ export function setupAdminRoutes(app, manager = defaultManager, { lobbyMusicStor
 
   app.post('/admin/api/lobby-music/uploads/:uploadId/finish', requireAdminSession, async (req, res) => {
     try {
-      const result = await lobbyMusicStore.finishUpload(req.params.uploadId);
+      const uploadId = String(req.params.uploadId || '');
+      if (!UPLOAD_ID_RE.test(uploadId)) {
+        return res.status(404).json({ error: 'Upload session not found or expired' });
+      }
+      const result = await lobbyMusicStore.finishUpload(uploadId);
       if (!result.ok) return res.status(result.status || 400).json({ error: result.error });
       broadcastLobbyMusic(result.tracks, { restart: false });
       res.status(201).json({
@@ -459,7 +472,11 @@ export function setupAdminRoutes(app, manager = defaultManager, { lobbyMusicStor
 
   app.delete('/admin/api/lobby-music/uploads/:uploadId', requireAdminSession, async (req, res) => {
     try {
-      await lobbyMusicStore.abortUpload(req.params.uploadId);
+      const uploadId = String(req.params.uploadId || '');
+      if (!UPLOAD_ID_RE.test(uploadId)) {
+        return res.json({ ok: true });
+      }
+      await lobbyMusicStore.abortUpload(uploadId);
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err.message || 'Could not abort upload' });
